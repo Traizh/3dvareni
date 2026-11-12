@@ -196,6 +196,8 @@ function setView(v) {
   view = v;
   $('menu').classList.toggle('hidden', v !== 'menu');
   $('lobby').classList.toggle('hidden', v !== 'lobby');
+  if (v !== 'game') releaseMouse();
+  updateLockHint();
   $('gameWrap').classList.toggle('hidden', !(v === 'game' || v === 'end'));
   $('endScreen').classList.toggle('hidden', v !== 'end');
   if (v === 'game' || v === 'end') resize();
@@ -337,41 +339,86 @@ socket.on('gameEnd', (r) => {
 });
 
 /* ---------------------------------------------------------------------
- *  Vstup z klávesnice
+ *  Vstup: klávesnice + myš (pohled z první osoby)
  * ------------------------------------------------------------------- */
-const KEYMAP = { ArrowLeft: 'L', KeyA: 'L', ArrowRight: 'R', KeyD: 'R', ArrowUp: 'U', KeyW: 'U', ArrowDown: 'D', KeyS: 'D' };
+const KEYMAP = { KeyW: 'U', ArrowUp: 'U', KeyS: 'D', ArrowDown: 'D', KeyA: 'L', KeyD: 'R' };   // chůze / úkrok
+const TURN = { ArrowLeft: 1, ArrowRight: -1 };                                                  // otáčení šipkami
 const keys = new Set();
-let holding = false;
-let lastSent = { dx: 0, dy: 0, hold: false };
+const turnKeys = new Set();
+let holdKey = false, holdMouse = false;
+let lastSent = { dx: 0, dy: 0, fx: 0, fy: 1, hold: false };
+let lastSendT = 0;
+const holdNow = () => holdKey || holdMouse;
 
-const inputVec = () => ({
-  dx: (keys.has('R') ? 1 : 0) - (keys.has('L') ? 1 : 0),
-  dy: (keys.has('D') ? 1 : 0) - (keys.has('U') ? 1 : 0),
-});
-
-function sendInput() {
-  const v = inputVec();
-  if (v.dx !== lastSent.dx || v.dy !== lastSent.dy || holding !== lastSent.hold) {
-    lastSent = { dx: v.dx, dy: v.dy, hold: holding };
-    socket.emit('input', lastSent);
-  }
+// směr chůze a pohledu ve světových souřadnicích (x, z)
+function currentInput() {
+  const fwd = (keys.has('U') ? 1 : 0) - (keys.has('D') ? 1 : 0);
+  const str = (keys.has('R') ? 1 : 0) - (keys.has('L') ? 1 : 0);
+  const fx = Math.sin(yaw), fy = Math.cos(yaw);
+  const rx = -Math.cos(yaw), ry = Math.sin(yaw);
+  let dx = fwd * fx + str * rx, dy = fwd * fy + str * ry;
+  const l = Math.hypot(dx, dy);
+  if (l > 1) { dx /= l; dy /= l; }
+  return { dx, dy, fx, fy };
 }
-function resetKeys() { keys.clear(); holding = false; sendInput(); }
+const r3 = (n) => Math.round(n * 1000) / 1000;
+
+function sendInput(force) {
+  const v = currentInput(), h = holdNow();
+  const changed = Math.abs(v.dx - lastSent.dx) > 0.001 || Math.abs(v.dy - lastSent.dy) > 0.001 ||
+    Math.abs(v.fx - lastSent.fx) > 0.01 || Math.abs(v.fy - lastSent.fy) > 0.01 || h !== lastSent.hold;
+  if (!changed) return;
+  const now = performance.now();
+  if (!force && now - lastSendT < 50) return;
+  lastSendT = now;
+  lastSent = { dx: r3(v.dx), dy: r3(v.dy), fx: r3(v.fx), fy: r3(v.fy), hold: h };
+  socket.emit('input', lastSent);
+}
+function resetKeys() {
+  keys.clear(); turnKeys.clear(); holdKey = false; holdMouse = false;
+  sendInput(true);
+}
+function press() { sendInput(true); socket.emit('press'); }
 
 window.addEventListener('keydown', (e) => {
   if (view !== 'game') return;
-  if (KEYMAP[e.code]) { e.preventDefault(); keys.add(KEYMAP[e.code]); sendInput(); return; }
+  if (KEYMAP[e.code]) { e.preventDefault(); keys.add(KEYMAP[e.code]); sendInput(true); return; }
+  if (TURN[e.code]) { e.preventDefault(); turnKeys.add(e.code); return; }
   if (e.code === 'Space' || e.code === 'KeyE') {
     e.preventDefault();
     Sound.init();
-    if (!e.repeat) { holding = true; socket.emit('press'); sendInput(); }
+    if (!e.repeat) { holdKey = true; sendInput(true); press(); }
   }
 });
 window.addEventListener('keyup', (e) => {
-  if (KEYMAP[e.code]) { keys.delete(KEYMAP[e.code]); sendInput(); }
-  if (e.code === 'Space' || e.code === 'KeyE') { holding = false; sendInput(); }
+  if (KEYMAP[e.code]) { keys.delete(KEYMAP[e.code]); sendInput(true); }
+  if (TURN[e.code]) turnKeys.delete(e.code);
+  if (e.code === 'Space' || e.code === 'KeyE') { holdKey = false; sendInput(true); }
 });
 window.addEventListener('blur', resetKeys);
+
+// myš: pointer lock (klik do hry); když ho prostředí nepovolí, jde se rozhlížet tažením
+const locked = () => document.pointerLockElement === canvas;
+let dragging = false;
+function updateLockHint() { $('lockHint').classList.toggle('hidden', view !== 'game' || locked()); }
+document.addEventListener('pointerlockchange', () => { updateLockHint(); if (!locked()) { holdMouse = false; sendInput(true); } });
+canvas.addEventListener('mousedown', (e) => {
+  if (view !== 'game' || e.button !== 0) return;
+  Sound.init();
+  if (!locked()) {
+    dragging = true;
+    try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (err) { /* nic */ }
+    return;
+  }
+  holdMouse = true; sendInput(true); press();      // levé tlačítko = interakce (jako E)
+});
+window.addEventListener('mouseup', () => { dragging = false; if (holdMouse) { holdMouse = false; sendInput(true); } });
+window.addEventListener('mousemove', (e) => {
+  if (view !== 'game' || !(locked() || dragging)) return;
+  yaw -= (e.movementX || 0) * 0.0024;
+  pitch = Math.max(-1.35, Math.min(1.2, pitch - (e.movementY || 0) * 0.0024));
+});
+function releaseMouse() { dragging = false; try { if (document.exitPointerLock) document.exitPointerLock(); } catch (e) { /* nic */ } }
 
 /* ---------------------------------------------------------------------
  *  Pohyb (predikce lokálního hráče – stejná pravidla jako na serveru)
@@ -387,11 +434,6 @@ function blocked(x, y) {
 function moveBy(o, dx, dy) {
   if (!blocked(o.x + dx, o.y)) o.x += dx;
   if (!blocked(o.x, o.y + dy)) o.y += dy;
-}
-function updateFacing(p, dx, dy) {
-  if (!dx && !dy) return;
-  if (dx && dy) { if (p.fx === dx || p.fy === dy) return; p.fx = dx; p.fy = 0; return; }
-  p.fx = dx; p.fy = dy;
 }
 const targetTile = (o) => [Math.floor(o.x + o.fx * REACH), Math.floor(o.y + o.fy * REACH)];
 
@@ -423,10 +465,10 @@ socket.on('state', (s) => {
 });
 
 function reconcile(p) {
-  if (!me) { me = { x: p.x, y: p.y, fx: p.fx, fy: p.fy }; return; }
+  if (!me) { me = { x: p.x, y: p.y, fx: p.fx, fy: p.fy }; yaw = Math.atan2(p.fx, p.fy); return; }
   const err = Math.hypot(p.x - me.x, p.y - me.y);
-  const v = inputVec();
-  const moving = v.dx || v.dy;
+  const v = currentInput();
+  const moving = Math.hypot(v.dx, v.dy) > 0.01;
   if (err > 1.5 || snap.cd > 0) { me.x = p.x; me.y = p.y; }
   else if (!moving && err > 0.001) { me.x += (p.x - me.x) * 0.3; me.y += (p.y - me.y) * 0.3; }
   else if (moving && err > 0.6) { me.x += (p.x - me.x) * 0.15; me.y += (p.y - me.y) * 0.15; }
@@ -458,12 +500,19 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x120a06, 28, 60);
-const camera = new THREE.PerspectiveCamera(38, 16 / 9, 0.5, 100);
-const CAM_TARGET = new THREE.Vector3(8, 0.4, 5.6);
-const CAM_PITCH = 58 * Math.PI / 180;
+scene.fog = new THREE.Fog(0x120a06, 22, 44);
+const camera = new THREE.PerspectiveCamera(72, 16 / 9, 0.05, 80);
+camera.rotation.order = 'YXZ';
+scene.add(camera);
+const EYE = 1.6;
+let yaw = 0, pitch = -0.25;       // yaw 0 = pohled na +z (dolů po mapě); doleva = přibývá
+const fpHeld = new THREE.Group(); // předmět v ruce, připevněný ke kameře
+fpHeld.position.set(0.32, -0.38, -0.8);
+fpHeld.rotation.set(0.25, -0.35, 0);
+camera.add(fpHeld);
+let fpSig = '';
 
-scene.add(new THREE.HemisphereLight(0xfff2dd, 0x5a4636, 0.85));
+scene.add(new THREE.HemisphereLight(0xfff2dd, 0x6a5646, 1.0));
 const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(4, 14, 9);
 sun.target.position.set(8, 0, 5);
@@ -482,12 +531,6 @@ function resize() {
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   camera.aspect = w / h;
-  const t = Math.tan(camera.fov * Math.PI / 360);
-  const dV = 5.4 / t;                         // svislé vměstnání (včetně horního panelu)
-  const dH = 8.7 / (t * camera.aspect);       // vodorovné vměstnání
-  const d = Math.max(dV, dH);
-  camera.position.set(CAM_TARGET.x, CAM_TARGET.y + Math.sin(CAM_PITCH) * d, CAM_TARGET.z + Math.cos(CAM_PITCH) * d);
-  camera.lookAt(CAM_TARGET);
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', () => { if (view === 'game' || view === 'end') resize(); });
@@ -650,8 +693,20 @@ function buildKitchen() {
   // podklad + zadní zeď
   const ground = M(geo('Plane', 60, 40), '#1b110c', 8, -0.06, 5, kitchen, { noShadow: true });
   ground.rotation.x = -Math.PI / 2;
-  M(geo('Box', 17, 2.4, 0.5), '#383747', 8, 1.2, -0.25, kitchen);
-  M(geo('Box', 17, 0.15, 0.55), '#46455a', 8, 2.4, -0.25, kitchen);
+  const WH = 2.8;
+  M(geo('Box', 17, WH, 0.5), '#8c8aa6', 8, WH / 2, -0.25, kitchen);          // zadní zeď
+  M(geo('Box', 17, WH, 0.5), '#8c8aa6', 8, WH / 2, 10.25, kitchen);          // přední zeď
+  M(geo('Box', 0.5, WH, 11), '#8c8aa6', -0.25, WH / 2, 5, kitchen);          // levá zeď
+  M(geo('Box', 0.5, WH, 11), '#8c8aa6', 16.25, WH / 2, 5, kitchen);          // pravá zeď
+  M(geo('Box', 17, 0.3, 0.55), '#46455a', 8, 0.15, -0.0, kitchen, { noShadow: true });
+  const ceil = M(geo('Plane', 17, 11), '#e9dfc8', 8, WH, 5, kitchen, { noShadow: true });
+  ceil.rotation.x = Math.PI / 2;
+  for (let lx = 0; lx < 3; lx++) {
+    for (let lz = 0; lz < 2; lz++) {
+      const lamp = M(geo('Box', 1.6, 0.06, 0.7), '#fffbe8', 3 + lx * 5, WH - 0.04, 2.6 + lz * 4.8, kitchen, { noShadow: true, mat: { emissive: '#fff2c0' } });
+      lamp.castShadow = false;
+    }
+  }
 
   const wTiles = [];
   for (let y = 0; y < ROWS; y++) {
@@ -664,8 +719,8 @@ function buildKitchen() {
         continue;
       }
       if (ch === '#') {
-        M(geo('Box', 1, 1.5, 1), '#383747', cx, 0.75, cz, kitchen);
-        M(geo('Box', 1.02, 0.12, 1.02), '#46455a', cx, 1.5, cz, kitchen);
+        M(geo('Box', 1, WH, 1), '#8c8aa6', cx, WH / 2, cz, kitchen);
+        M(geo('Box', 1.02, 0.14, 1.02), '#46455a', cx, 0.07, cz, kitchen);
         continue;
       }
       if (CRATE[ch]) {
@@ -899,6 +954,8 @@ function syncChefs(dt) {
     if (!c) { c = makeChef(a.c); scene.add(c.g); c.tag.textContent = a.n; chefs.set(a.id, c); }
     const bob = a.moving ? Math.abs(Math.sin(a.phase)) * 0.06 : 0;
     c.g.position.set(a.x, bob, a.y);
+    const mine = a.id === myId;
+    c.body.visible = !mine;
     // plynulé otáčení do směru pohybu
     const target = Math.atan2(a.fx, a.fy);
     let diff = target - a.ang;
@@ -913,6 +970,11 @@ function syncChefs(dt) {
       if (a.h) c.holder.add(makeItem(a.h));
     }
     if (c.tag.textContent !== a.n) c.tag.textContent = a.n;
+    if (mine && sig !== fpSig) {
+      fpSig = sig;
+      clearGroup(fpHeld);
+      if (a.h) fpHeld.add(makeItem(a.h));
+    }
   }
 }
 
@@ -982,6 +1044,8 @@ function floatFixed(text, color) {
 const tmpV = new THREE.Vector3();
 function place(el, x, y, z, dxPx, dyPx) {
   tmpV.set(x, y, z).project(camera);
+  if (tmpV.z > 1) { el.style.display = 'none'; return; }
+  el.style.display = '';
   const w = canvas.clientWidth, h = canvas.clientHeight;
   const sx = (tmpV.x * 0.5 + 0.5) * w + (dxPx || 0);
   const sy = (-tmpV.y * 0.5 + 0.5) * h + (dyPx || 0);
@@ -1027,7 +1091,8 @@ function updateOverlays() {
   // jména kuchařů
   for (const [id, c] of chefs) {
     const a = actors.get(id);
-    if (a) place(c.tag, a.x, 1.75, a.y);
+    if (a && id !== myId) place(c.tag, a.x, 1.75, a.y);
+    else c.tag.style.display = 'none';
   }
 }
 
@@ -1049,16 +1114,19 @@ function updateFloaters(dt) {
  * ===================================================================== */
 function update(dt) {
   const playing = view === 'game' && snap && snap.cd === 0;
-  const v = inputVec();
-  if (me && playing && (v.dx || v.dy)) {
-    const len = Math.hypot(v.dx, v.dy);
-    moveBy(me, (v.dx / len) * SPEED * dt, (v.dy / len) * SPEED * dt);
-    updateFacing(me, v.dx, v.dy);
+  let turn = 0;
+  for (const code of turnKeys) turn += TURN[code];
+  if (turn) yaw += turn * 2.4 * dt;
+  const v = currentInput();
+  const walking = Math.hypot(v.dx, v.dy) > 0.01;
+  if (me) {
+    me.fx = v.fx; me.fy = v.fy;
+    if (playing && walking) moveBy(me, v.dx * SPEED * dt, v.dy * SPEED * dt);
   }
   for (const a of actors.values()) {
     if (a.id === myId && me) {
       a.x = me.x; a.y = me.y; a.fx = me.fx; a.fy = me.fy;
-      a.moving = !!(playing && (v.dx || v.dy));
+      a.moving = !!(playing && walking);
     } else {
       const k = Math.min(1, dt * 14), ox = a.x, oy = a.y;
       a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k;
@@ -1066,6 +1134,15 @@ function update(dt) {
     }
     if (a.moving) a.phase += dt * 14;
   }
+  sendInput(false);
+}
+
+function updateCamera(tm) {
+  if (!me) return;
+  const a = actors.get(myId);
+  const bob = a && a.moving ? Math.sin(a.phase) * 0.035 : 0;
+  camera.position.set(me.x, EYE + bob, me.y);
+  camera.rotation.set(pitch, yaw + Math.PI, 0);
 }
 
 function updateHighlight() {
@@ -1084,6 +1161,7 @@ function frame(now) {
   lastFrame = now;
   if ((view !== 'game' && view !== 'end') || !map || !snap || !kitchen) return;
   update(dt);
+  updateCamera(now / 1000);
   syncChefs(dt);
   updateStations(now / 1000);
   updateHighlight();

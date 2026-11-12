@@ -1,6 +1,6 @@
 # 🍔 Šílená kuchyně 3D
 
-Multiplayerová kooperativní 3D kuchyňská hra (styl Overcooked) pro 2–4 hráče.
+Multiplayerová kooperativní 3D kuchyňská hra z pohledu první osoby (styl Overcooked) pro 2–4 hráče.
 Server: Node.js + Express + Socket.io (autoritativní simulace). Klient: Three.js (modely se staví v kódu).
 
 ## Struktura
@@ -33,3 +33,6 @@ Server má povolené CORS pro všechny originy, takže hra z itch.io funguje.
 npm install
 npm start      # http://localhost:3000  (v game.js přepiš SERVER_URL na http://localhost:3000)
 ```
+
+## Ovládání
+WASD / ↑↓ – chůze a úkrok, myš (klikni do hry) nebo ←→ – rozhlížení, E / mezerník / levé tlačítko myši – interakce s tím, na co se díváš. Krájení a mytí: podrž interakci.

@@ -135,16 +135,6 @@ function moveBy(o, dx, dy) {
   if (!blocked(o.x, o.y + dy)) o.y += dy;
 }
 
-function updateFacing(p, dx, dy) {
-  if (!dx && !dy) return;
-  if (dx && dy) {
-    if (p.fx === dx || p.fy === dy) return; // úhlopříčka: zachovej směr, pokud sedí
-    p.fx = dx; p.fy = 0;
-    return;
-  }
-  p.fx = dx; p.fy = dy;
-}
-
 function separate(list) {
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
@@ -486,9 +476,9 @@ function tickRoom(room, dt) {
   for (const p of list) {
     const { dx, dy } = p.input;
     if (dx || dy) {
-      const len = Math.hypot(dx, dy);
-      moveBy(p, (dx / len) * SPEED * dt, (dy / len) * SPEED * dt);
-      updateFacing(p, dx, dy);
+      // analogový pohyb z pohledu první osoby (délka vektoru max. 1)
+      const k = SPEED * dt / Math.max(1, Math.hypot(dx, dy));
+      moveBy(p, dx * k, dy * k);
     }
   }
   separate(list);
@@ -523,7 +513,7 @@ function snapshot(room) {
     cd: r1(room.cd),
     sc: room.score,
     pl: [...room.players.values()].map((p) => ({
-      id: p.id, n: p.name, c: p.color, x: r2(p.x), y: r2(p.y), fx: p.fx, fy: p.fy, h: p.held,
+      id: p.id, n: p.name, c: p.color, x: r2(p.x), y: r2(p.y), fx: r2(p.fx), fy: r2(p.fy), h: p.held,
     })),
     s,
     o: room.orders.map((o) => ({ id: o.id, r: o.r, t: r1(o.t), l: o.l })),
@@ -578,11 +568,11 @@ io.on('connection', (socket) => {
   socket.on('input', (d) => {
     const p = playerOf(socket);
     if (!p || !d) return;
-    p.input = {
-      dx: Math.sign(Number(d.dx) || 0),
-      dy: Math.sign(Number(d.dy) || 0),
-      hold: !!d.hold,
-    };
+    const cl = (n) => Math.max(-1, Math.min(1, Number(n) || 0));
+    p.input = { dx: cl(d.dx), dy: cl(d.dy), hold: !!d.hold };
+    // směr pohledu (jednotkový vektor) – podle něj se míří na stanice
+    const fx = Number(d.fx), fy = Number(d.fy), fl = Math.hypot(fx, fy);
+    if (isFinite(fl) && fl > 0.01) { p.fx = fx / fl; p.fy = fy / fl; }
   });
 
   socket.on('press', () => {

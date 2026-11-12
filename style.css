@@ -260,3 +260,28 @@ canvas#game { position: absolute; inset: 0; display: block; width: 100%; height:
 #lockHint { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px;
   background: rgba(0,0,0,.65); color: #ffd27a; font-weight: 800; font-size: .9rem; }
 canvas#game { cursor: crosshair; }
+
+/* ---------- Režimy, solo, obchod ---------- */
+.modes { display: flex; gap: 8px; margin: 4px 0 6px; }
+.mode { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 9px 8px; font: inherit; color: #fff4dc; cursor: pointer;
+  background: #3a2616; border: 2px solid #5f3a1e; border-radius: 12px; }
+.mode b { font-size: 1rem; }
+.mode span { font-size: .72rem; color: #d9b98a; }
+.mode.active { background: linear-gradient(#ff9d2e, #e5731a); border-color: #ffc16b; color: #2b1305; }
+.mode.active span { color: #5b2d0a; }
+.mode:disabled { cursor: default; opacity: .8; }
+.mode:hover:not(:disabled):not(.active) { filter: brightness(1.2); }
+.hint.small { font-size: .78rem; margin: 4px 0 6px; min-height: 2.4em; }
+.btn.solo { width: 100%; margin-top: 10px; }
+.lobbymodes { margin-top: 14px; }
+
+.panel.wide { width: min(94vw, 560px); }
+.moneyline { font-size: 2.2rem; font-weight: 800; color: #9dffb0; text-shadow: 0 3px 0 #1f5a2c; }
+#shopItems { margin: 8px 0; }
+.shoprow { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px; background: rgba(0,0,0,.28); border-radius: 12px; text-align: left; }
+.shoprow .sname { flex: 1; font-weight: 700; }
+.shoprow .sstock { width: 74px; font-size: .85rem; color: #d9b98a; }
+.shoprow .sstock.zero { color: #ff9a90; font-weight: 800; }
+.shoprow .sprice { width: 52px; text-align: right; font-weight: 700; color: #ffd27a; }
+.shoprow .btn.small { margin-top: 0; min-width: 44px; }
+.tag.zero { background: #b3261e; }

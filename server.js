@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 3000;
 const TICK_RATE = 30;
 const GAME_TIME = 180;       // délka kola (s)
 const COUNTDOWN = 3;         // odpočet před startem (s)
-const MIN_PLAYERS = 2;
+const MIN_PLAYERS = 1;       // lze hrát i sám
 const MAX_PLAYERS = 4;
 const SPEED = 4.6;           // dlaždic za sekundu
 const HALF = 0.3;            // polovina velikosti hráče (kolize)
@@ -34,6 +34,16 @@ const DIRTY_DELAY = 5;       // za jak dlouho se vrátí špinavý talíř
 const START_PLATES = 4;
 const MAX_ORDERS = 5;
 const EXPIRE_PENALTY = 5;
+// Režim „Dny“: zásoby, nákup surovin, nájem
+const DAY_TIME = 120;        // délka jednoho dne (s)
+const START_MONEY = 50;
+const START_STOCK = { bun: 5, meat: 5, cheese: 3, lettuce: 3, tomato: 3 };
+const PRICES = { bun: 2, meat: 5, cheese: 3, lettuce: 2, tomato: 2 };
+const STOCK_CAP = 30;        // max. zásoba jedné suroviny
+const RENT_BASE = 25, RENT_STEP = 10;
+const rentFor = (day) => RENT_BASE + RENT_STEP * (day - 1);
+const ING_CS = { bun: 'housky', meat: 'masa', cheese: 'sýra', lettuce: 'salátu', tomato: 'rajčat' };
+const MODES = ['classic', 'days'];
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
 const SPAWNS = [[3.5, 2.5], [12.5, 2.5], [3.5, 7.5], [12.5, 7.5]];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -155,13 +165,16 @@ const targetOf = (p) => [Math.floor(p.x + p.fx * REACH), Math.floor(p.y + p.fy *
 /* ------------------------------------------------------------------ */
 /*  Místnosti                                                          */
 /* ------------------------------------------------------------------ */
-function createRoom() {
+function createRoom(mode) {
   let code;
   do {
     code = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
   } while (rooms.has(code));
   const room = {
     code, state: 'lobby', players: new Map(),
+    mode: mode === 'days' ? 'days' : 'classic', host: null, len: GAME_TIME,
+    money: 0, stock: {}, day: 1, dayStartMoney: 0, ready: new Set(), lastSummary: null,
+    totalDelivered: 0, totalExpired: 0,
     st: {}, stoves: [], sinks: [], orders: [], returns: [], events: [],
     time: 0, cd: 0, score: 0, plates: 0, dirty: 0,
     delivered: 0, expired: 0, orderSeq: 0, nextOrder: 0, last: null,
@@ -172,7 +185,7 @@ function createRoom() {
 
 function roomInfo(room) {
   return {
-    code: room.code, state: room.state, min: MIN_PLAYERS, max: MAX_PLAYERS,
+    code: room.code, state: room.state, mode: room.mode, host: room.host, min: MIN_PLAYERS, max: MAX_PLAYERS,
     players: [...room.players.values()].map((p) => ({ id: p.id, n: p.name, c: p.color })),
   };
 }
@@ -188,6 +201,7 @@ function addPlayer(room, socket, name) {
     held: null, input: { dx: 0, dy: 0, hold: false }, sfxT: 0,
   };
   room.players.set(socket.id, p);
+  if (!room.host) room.host = socket.id;
   socket.join(room.code);
   socket.data.code = room.code;
   return p;
@@ -203,8 +217,13 @@ function removePlayer(socket) {
   const p = room.players.get(socket.id);
   if (p && isPlate(p.held)) room.plates++; // talíř se nesmí ztratit
   room.players.delete(socket.id);
+  room.ready.delete(socket.id);
   if (room.players.size === 0) rooms.delete(code);
-  else broadcastRoom(room);
+  else {
+    if (room.host === socket.id) room.host = room.players.keys().next().value;
+    broadcastRoom(room);
+    if (room.state === 'shop') { broadcastShop(room); checkReady(room); }
+  }
 }
 
 const playerOf = (socket) => {
@@ -234,9 +253,21 @@ function buildStations(room) {
 }
 
 function startGame(room) {
+  if (room.mode === 'days') {
+    room.day = 1; room.money = START_MONEY; room.stock = Object.assign({}, START_STOCK);
+    room.totalDelivered = 0; room.totalExpired = 0; room.lastSummary = null;
+  }
+  beginRound(room);
+}
+
+// jedno kolo (klasika) nebo jeden den
+function beginRound(room) {
   room.state = 'playing';
-  room.time = GAME_TIME; room.cd = COUNTDOWN;
+  room.len = room.mode === 'days' ? DAY_TIME : GAME_TIME;
+  room.time = room.len; room.cd = COUNTDOWN;
   room.score = 0; room.delivered = 0; room.expired = 0;
+  room.dayStartMoney = room.money;
+  room.ready.clear();
   room.orders = []; room.orderSeq = 0; room.nextOrder = 1;
   room.returns = []; room.events = [];
   room.plates = START_PLATES; room.dirty = 0;
@@ -246,16 +277,71 @@ function startGame(room) {
     p.fx = 0; p.fy = 1; p.held = null;
     p.input = { dx: 0, dy: 0, hold: false }; p.sfxT = 0;
   }
-  io.to(room.code).emit('gameStart', { map: MAP, recipes: RECIPES_PUBLIC, time: GAME_TIME, cd: COUNTDOWN });
+  io.to(room.code).emit('gameStart', { map: MAP, recipes: RECIPES_PUBLIC, time: room.len, cd: COUNTDOWN, mode: room.mode, day: room.day });
   broadcastRoom(room);
 }
 
+/* ---------- Režim „Dny“: obchod mezi dny ---------- */
+function shopPayload(room) {
+  return {
+    day: room.day, money: room.money, stock: room.stock, prices: PRICES, cap: STOCK_CAP,
+    rent: rentFor(room.day), summary: room.lastSummary,
+    ready: [...room.ready], players: room.players.size,
+  };
+}
+const broadcastShop = (room) => io.to(room.code).emit('shop', shopPayload(room));
+
+function checkReady(room) {
+  if (room.state !== 'shop' || room.players.size === 0) return;
+  for (const id of room.players.keys()) if (!room.ready.has(id)) return;
+  beginRound(room);
+}
+
+// jde z toho, co zbylo (a za co se dá koupit), uvařit aspoň jedno jídlo?
+function canProduce(room) {
+  return RECIPES.some((r) => r.items.reduce((c, k) => c + ((room.stock[k] || 0) > 0 ? 0 : PRICES[k]), 0) <= room.money);
+}
+
+function endDay(room) {
+  const net = room.money - room.dayStartMoney;
+  const rent = rentFor(room.day);
+  room.totalDelivered += room.delivered; room.totalExpired += room.expired;
+  room.money -= rent;
+  for (const p of room.players.values()) { p.held = null; p.input = { dx: 0, dy: 0, hold: false }; }
+  ev(room, 'end', 0, 0);
+  io.to(room.code).emit('state', snapshot(room));
+  room.lastSummary = { day: room.day, net, rent, delivered: room.delivered, expired: room.expired };
+
+  let bust = null, daysDone = room.day;
+  if (room.money < 0) { bust = 'Nezbyly peníze na nájem (' + rent + ' Kč).'; daysDone = room.day - 1; }
+  else if (!canProduce(room)) { bust = 'Došly zásoby a není za co nakoupit.'; }
+
+  if (bust) {
+    room.state = 'ended';
+    room.last = {
+      mode: 'days', days: daysDone, money: Math.max(0, room.money), reason: bust,
+      delivered: room.totalDelivered, expired: room.totalExpired,
+      stars: daysDone >= 7 ? 3 : daysDone >= 4 ? 2 : daysDone >= 2 ? 1 : 0,
+    };
+    io.to(room.code).emit('gameEnd', room.last);
+    broadcastRoom(room);
+    return;
+  }
+  room.day++;
+  room.state = 'shop';
+  room.ready.clear();
+  broadcastRoom(room);
+  broadcastShop(room);
+}
+
 function endGame(room) {
+  if (room.mode === 'days') return endDay(room);
   room.state = 'ended';
   const s = room.score;
+  const k = room.players.size <= 1 ? 0.6 : 1;      // sólo hra má mírnější hranice hvězd
   room.last = {
-    score: s, delivered: room.delivered, expired: room.expired,
-    stars: s >= 240 ? 3 : s >= 140 ? 2 : s >= 60 ? 1 : 0,
+    mode: 'classic', score: s, delivered: room.delivered, expired: room.expired,
+    stars: s >= 240 * k ? 3 : s >= 140 * k ? 2 : s >= 60 * k ? 1 : 0,
   };
   for (const p of room.players.values()) {
     p.held = null; p.input = { dx: 0, dy: 0, hold: false };
@@ -345,7 +431,15 @@ function interact(room, p) {
   const fx = tx + 0.5, fy = ty + 0.5;
 
   if (CRATES[ch]) {
-    if (!held) { p.held = newIngredient(CRATES[ch]); return ev(room, 'pick', fx, fy); }
+    if (!held) {
+      const k = CRATES[ch];
+      if (room.mode === 'days') {
+        if ((room.stock[k] || 0) <= 0) return ev(room, 'no', fx, fy, { m: 'Došlo ' + ING_CS[k] + '!' });
+        room.stock[k]--;
+      }
+      p.held = newIngredient(k);
+      return ev(room, 'pick', fx, fy);
+    }
     return ev(room, 'no', fx, fy);
   }
   switch (ch) {
@@ -381,7 +475,8 @@ function interact(room, p) {
       if (idx < 0) return ev(room, 'no', fx, fy, { m: 'Tohle nikdo neobjednal!' });
       const o = room.orders.splice(idx, 1)[0];
       const pts = 15 + 5 * RECIPES_PUBLIC[o.r].items.length + Math.round(10 * Math.max(0, o.t / o.l));
-      room.score += pts; room.delivered++;
+      if (room.mode === 'days') room.money += pts; else room.score += pts;
+      room.delivered++;
       p.held = null;
       room.returns.push(DIRTY_DELAY); // špinavý talíř se vrátí k dřezu
       return ev(room, 'serve', fx, fy, { v: pts });
@@ -434,7 +529,7 @@ function spawnOrder(room) {
   const total = RECIPES.reduce((a, r) => a + r.w, 0);
   let x = Math.random() * total, rec = RECIPES[0];
   for (const r of RECIPES) { x -= r.w; if (x <= 0) { rec = r; break; } }
-  const limit = 55 + rec.items.length * 12;
+  const limit = Math.round((55 + rec.items.length * 12) * (room.players.size <= 1 ? 1.3 : 1));
   room.orders.push({ id: ++room.orderSeq, r: rec.id, t: limit, l: limit });
   ev(room, 'order', 0, 0);
 }
@@ -446,8 +541,9 @@ function updateOrders(room, dt) {
     spawnOrder(room);
     if (room.orderSeq === 1) room.nextOrder = 6;
     else {
-      const elapsed = 1 - room.time / GAME_TIME;
-      const f = [1, 1, 1.15, 1, 0.85][Math.min(room.players.size, 4)];
+      let elapsed = 1 - room.time / room.len;
+      if (room.mode === 'days') elapsed = Math.min(1, elapsed * 0.5 + Math.min(0.5, (room.day - 1) * 0.08));   // dny jsou postupně těžší
+      const f = [1, 1.6, 1.15, 1, 0.85][Math.min(room.players.size, 4)];
       room.nextOrder = Math.max(7, (17 - 6 * elapsed) * f + (Math.random() * 4 - 2));
     }
   }
@@ -457,7 +553,8 @@ function updateOrders(room, dt) {
     if (o.t <= 0) {
       room.orders.splice(i, 1);
       room.expired++;
-      room.score = Math.max(0, room.score - EXPIRE_PENALTY);
+      if (room.mode === 'days') room.money = Math.max(0, room.money - EXPIRE_PENALTY);
+      else room.score = Math.max(0, room.score - EXPIRE_PENALTY);
       ev(room, 'expire', 0, 0);
     }
   }
@@ -508,10 +605,10 @@ function snapshot(room) {
   }
   const events = room.events;
   room.events = [];
-  return {
+  const out = {
     t: r1(Math.max(0, room.time)),
     cd: r1(room.cd),
-    sc: room.score,
+    sc: room.mode === 'days' ? room.money : room.score,
     pl: [...room.players.values()].map((p) => ({
       id: p.id, n: p.name, c: p.color, x: r2(p.x), y: r2(p.y), fx: r2(p.fx), fy: r2(p.fy), h: p.held,
     })),
@@ -521,6 +618,8 @@ function snapshot(room) {
     w: room.dirty,
     ev: events,
   };
+  if (room.mode === 'days') { out.sk = room.stock; out.dy = room.day; }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -531,10 +630,11 @@ io.on('connection', (socket) => {
 
   socket.on('create', (d) => {
     removePlayer(socket);
-    const room = createRoom();
+    const room = createRoom(d && d.mode);
     addPlayer(room, socket, cleanName(d && d.name));
     socket.emit('joined', { id: socket.id, code: room.code });
     broadcastRoom(room);
+    if (d && d.solo) startGame(room);          // „Hrát sám“ – rovnou start
   });
 
   socket.on('join', (d) => {
@@ -549,11 +649,48 @@ io.on('connection', (socket) => {
     addPlayer(room, socket, cleanName(d.name));
     socket.emit('joined', { id: socket.id, code: room.code });
     broadcastRoom(room);
+    if (room.state === 'shop') broadcastShop(room);   // nově příchozí rovnou uvidí obchod
+  });
+
+  // Hostitel mění režim v lobby
+  socket.on('setMode', (d) => {
+    const room = rooms.get(socket.data.code);
+    if (!room || room.state !== 'lobby' || room.host !== socket.id) return;
+    const mode = d && d.mode;
+    if (!MODES.includes(mode) || mode === room.mode) return;
+    room.mode = mode;
+    broadcastRoom(room);
+  });
+
+  // Režim „Dny“: nákup surovin mezi dny
+  socket.on('buy', (d) => {
+    const room = rooms.get(socket.data.code);
+    if (!room || room.state !== 'shop' || !d) return;
+    const k = String(d.k);
+    if (!Object.prototype.hasOwnProperty.call(PRICES, k)) return;
+    let n = Math.floor(Number(d.n));
+    if (!(n >= 1)) return;
+    const have = room.stock[k] || 0;
+    n = Math.min(n, STOCK_CAP - have);
+    if (n <= 0) return socket.emit('err', { m: 'Sklad je plný (max ' + STOCK_CAP + ').' });
+    const cost = PRICES[k] * n;
+    if (cost > room.money) return socket.emit('err', { m: 'Nemáš dost peněz.' });
+    room.money -= cost;
+    room.stock[k] = have + n;
+    broadcastShop(room);
+  });
+
+  socket.on('ready', () => {
+    const room = rooms.get(socket.data.code);
+    if (!room || room.state !== 'shop' || !room.players.has(socket.id)) return;
+    if (room.ready.has(socket.id)) room.ready.delete(socket.id); else room.ready.add(socket.id);
+    broadcastShop(room);
+    checkReady(room);
   });
 
   socket.on('start', () => {
     const room = rooms.get(socket.data.code);
-    if (!room || room.state === 'playing') return;
+    if (!room || room.state === 'playing' || room.state === 'shop') return;
     if (room.players.size < MIN_PLAYERS) return socket.emit('err', { m: 'Pro start jsou potřeba aspoň ' + MIN_PLAYERS + ' hráči.' });
     startGame(room);
   });
@@ -605,5 +742,5 @@ if (require.main === module) {
   server.listen(PORT, () => console.log('Šílená kuchyně běží na portu ' + PORT));
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 } else {
-  module.exports = { rooms, tickRoom, interact, snapshot, startGame, MAP }; // pro testy
+  module.exports = { rooms, tickRoom, interact, snapshot, startGame, MAP, PRICES, rentFor }; // pro testy
 }

@@ -36,3 +36,8 @@ npm start      # http://localhost:3000  (v game.js přepiš SERVER_URL na http:/
 
 ## Ovládání
 WASD / ↑↓ – chůze a úkrok, myš (klikni do hry) nebo ←→ – rozhlížení, E / mezerník / levé tlačítko myši – interakce s tím, na co se díváš. Krájení a mytí: podrž interakci.
+
+## Režimy
+- **Klasika** – jedno kolo 180 s, týmové skóre a hvězdy.
+- **Dny** – každý den 120 s. Suroviny z beden ubývají ze skladu, peníze získáváš z odevzdaných objednávek. Mezi dny se v obchodě objednávají zásoby a platí se nájem (25 Kč a každý den o 10 víc). Hra končí, když nezaplatíš nájem nebo ti nezbydou zásoby ani peníze na nákup.
+- **Hrát sám** – tlačítko v menu spustí zvolený režim hned a bez dalších hráčů.

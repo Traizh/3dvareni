@@ -15,6 +15,12 @@
 
     <p id="netStatus" class="net wait">⏳ Načítám hru…</p>
 
+    <div class="modes">
+      <button id="modeClassic" class="mode active"><b>Klasika</b><span>180 s · skóre</span></button>
+      <button id="modeDays" class="mode"><b>Dny</b><span>zásoby · peníze · nájem</span></button>
+    </div>
+    <p id="modeInfo" class="hint small"></p>
+
     <label for="nameInput">Přezdívka</label>
     <input id="nameInput" type="text" maxlength="12" placeholder="např. Šéfkuchař" autocomplete="off">
 
@@ -25,6 +31,7 @@
       <button id="joinBtn" class="btn" disabled>Připojit se</button>
       <button id="createBtn" class="btn primary" disabled>Vytvořit novou místnost</button>
     </div>
+    <button id="soloBtn" class="btn solo" disabled>🧑‍🍳 Hrát sám</button>
     <p id="menuError" class="error"></p>
 
     <div class="help">
@@ -32,7 +39,8 @@
       Pohyb: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> (nebo <kbd>↑</kbd><kbd>↓</kbd>), rozhlížení: <b>myš</b> (klikni do hry) nebo <kbd>←</kbd><kbd>→</kbd><br>
       Interakce s tím, na co se díváš: <kbd>E</kbd>, <kbd>mezerník</kbd> nebo levé tlačítko myši – zvednout / položit.<br>
       Krájení a mytí: u prkénka / dřezu <b>podrž</b> nebo <b>mačkej</b> interakci.<br>
-      Maso: nakrájej → opeč na sporáku → pozor, ať se nespálí!
+      Maso: nakrájej → opeč na sporáku → pozor, ať se nespálí!<br>
+      Režim <b>Dny</b>: každá surovina z bedny ubývá ze skladu. Mezi dny objednáváš nové zásoby za peníze z objednávek a platíš nájem.
     </div>
   </main>
 
@@ -42,6 +50,12 @@
     <p class="sub">Kód místnosti</p>
     <div id="roomCode" class="code">----</div>
     <button id="copyLink" class="btn small">📋 Zkopírovat odkaz</button>
+
+    <div class="modes lobbymodes">
+      <button id="lobbyClassic" class="mode active"><b>Klasika</b><span>180 s · skóre</span></button>
+      <button id="lobbyDays" class="mode"><b>Dny</b><span>zásoby · peníze · nájem</span></button>
+    </div>
+    <p id="lobbyModeInfo" class="hint small"></p>
 
     <ul id="playerList" class="players"></ul>
     <p id="lobbyHint" class="hint"></p>
@@ -77,9 +91,9 @@
   <!-- Závěrečné skóre -->
   <div id="endScreen" class="overlay hidden">
     <div class="panel">
-      <h1>Konec směny!</h1>
+      <h1 id="endTitle">Konec směny!</h1>
       <div id="stars" class="stars">☆☆☆</div>
-      <div class="sub">Týmové skóre</div>
+      <div id="endLabel" class="sub">Týmové skóre</div>
       <div id="endScore" class="bigscore">0</div>
       <p id="endStats" class="hint"></p>
       <div class="row">
@@ -87,6 +101,20 @@
         <button id="toLobbyBtn" class="btn">Zpět do lobby</button>
       </div>
       <button id="endLeaveBtn" class="btn small">Odejít</button>
+    </div>
+  </div>
+
+  <!-- Obchod mezi dny (režim Dny) -->
+  <div id="shopScreen" class="overlay hidden">
+    <div class="panel wide">
+      <h1 id="shopTitle">Objednávka surovin</h1>
+      <p id="shopSummary" class="hint"></p>
+      <div class="moneyline">💰 <b id="shopMoney">0</b> Kč</div>
+      <p id="shopRent" class="hint"></p>
+      <div id="shopItems"></div>
+      <p id="shopReady" class="hint"></p>
+      <div class="row"><button id="readyBtn" class="btn primary">Připraven</button></div>
+      <button id="shopLeave" class="btn small">Odejít</button>
     </div>
   </div>
 

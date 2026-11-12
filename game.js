@@ -167,6 +167,9 @@ let me = null;                  // předpovídaná pozice lokálního hráče
 const actors = new Map();       // všichni kuchaři (vyhlazené pozice)
 let floaters = [];
 let lastCd = null, lastTick = null;
+let gameMode = 'classic', dayNo = 1;   // režim aktuální hry
+let menuMode = 'classic';               // režim vybraný v menu
+let shopData = null;
 
 /* ---------------------------------------------------------------------
  *  Socket + stav připojení
@@ -181,6 +184,7 @@ function setNet(kind, text) {
   st.className = 'net ' + kind;
   $('createBtn').disabled = !connected;
   $('joinBtn').disabled = !connected;
+  $('soloBtn').disabled = !connected;
 }
 setNet('wait', '⏳ Připojuji k serveru… (první start na Renderu může trvat až minutu)');
 socket.on('connect', () => { connected = true; setNet('ok', '✅ Připojeno k serveru'); });
@@ -198,9 +202,10 @@ function setView(v) {
   $('lobby').classList.toggle('hidden', v !== 'lobby');
   if (v !== 'game') releaseMouse();
   updateLockHint();
-  $('gameWrap').classList.toggle('hidden', !(v === 'game' || v === 'end'));
+  $('gameWrap').classList.toggle('hidden', !(v === 'game' || v === 'end' || v === 'shop'));
   $('endScreen').classList.toggle('hidden', v !== 'end');
-  if (v === 'game' || v === 'end') resize();
+  $('shopScreen').classList.toggle('hidden', v !== 'shop');
+  if (v === 'game' || v === 'end' || v === 'shop') resize();
 }
 
 let toastTimer = null;
@@ -227,9 +232,26 @@ function getName() {
 }
 function menuError(m) { $('menuError').textContent = m || ''; }
 
+const MODE_INFO = {
+  classic: 'Klasika: jedno kolo 180 s, hrajete o týmové skóre.',
+  days: 'Dny: každý den 120 s. Suroviny se spotřebovávají, mezi dny je objednáváš za peníze z objednávek a platíš nájem.',
+};
+function paintModes() {
+  $('modeClassic').classList.toggle('active', menuMode === 'classic');
+  $('modeDays').classList.toggle('active', menuMode === 'days');
+  $('modeInfo').textContent = MODE_INFO[menuMode];
+}
+$('modeClassic').onclick = () => { menuMode = 'classic'; paintModes(); };
+$('modeDays').onclick = () => { menuMode = 'days'; paintModes(); };
+paintModes();
+
 $('createBtn').onclick = () => {
   Sound.init(); menuError('');
-  socket.emit('create', { name: getName() });
+  socket.emit('create', { name: getName(), mode: menuMode });
+};
+$('soloBtn').onclick = () => {
+  Sound.init(); menuError('');
+  socket.emit('create', { name: getName(), mode: menuMode, solo: true });
 };
 $('joinBtn').onclick = () => {
   Sound.init(); menuError('');
@@ -264,8 +286,17 @@ $('copyLink').onclick = () => {
   else toast('Kód místnosti: ' + roomInfo.code);
 };
 
+$('lobbyClassic').onclick = () => socket.emit('setMode', { mode: 'classic' });
+$('lobbyDays').onclick = () => socket.emit('setMode', { mode: 'days' });
+
 function renderLobby(info) {
   $('roomCode').textContent = info.code;
+  const isHost = info.host === myId;
+  $('lobbyClassic').classList.toggle('active', info.mode === 'classic');
+  $('lobbyDays').classList.toggle('active', info.mode === 'days');
+  $('lobbyClassic').disabled = !isHost;
+  $('lobbyDays').disabled = !isHost;
+  $('lobbyModeInfo').textContent = MODE_INFO[info.mode] + (isHost ? '' : ' (režim volí hostitel)');
   const ul = $('playerList');
   ul.innerHTML = '';
   info.players.forEach((p) => {
@@ -299,10 +330,10 @@ socket.on('joined', (d) => {
 
 socket.on('room', (info) => {
   roomInfo = info;
-  if (info.state === 'lobby' && (view === 'end' || view === 'game')) setView('lobby');
+  if (info.state === 'lobby' && (view === 'end' || view === 'game' || view === 'shop')) setView('lobby');
   if (view === 'lobby') renderLobby(info);
   if (view === 'end') $('againBtn').disabled = info.players.length < info.min;
-  $('roomLbl').textContent = 'MÍSTNOST ' + info.code;
+  updateRoomLabel();
 });
 
 socket.on('err', (d) => { menuError(d.m); toast(d.m, true); });
@@ -318,6 +349,7 @@ socket.on('disconnect', () => {
 
 socket.on('gameStart', (d) => {
   map = d.map; recipes = d.recipes;
+  gameMode = d.mode || 'classic'; dayNo = d.day || 1;
   snap = null; me = null; floaters.forEach((f) => f.el.remove()); floaters = [];
   clearActors();
   lastCd = null; lastTick = null;
@@ -326,17 +358,78 @@ socket.on('gameStart', (d) => {
   $('countdown').classList.add('hidden');
   $('goText').classList.remove('show');
   clearOrders();
+  updateRoomLabel();
   setView('game');
 });
 
 socket.on('gameEnd', (r) => {
   resetKeys();
+  const days = r.mode === 'days';
+  $('endTitle').textContent = days ? 'Restaurace zavřela' : 'Konec směny!';
+  $('endLabel').textContent = days ? 'Přežité dny' : 'Týmové skóre';
   $('stars').textContent = '★'.repeat(r.stars) + '☆'.repeat(3 - r.stars);
-  $('endScore').textContent = r.score;
-  $('endStats').textContent = 'Odevzdaná jídla: ' + r.delivered + '  ·  Propadlé objednávky: ' + r.expired;
+  $('endScore').textContent = days ? r.days : r.score;
+  $('endStats').textContent = days
+    ? r.reason + '  ·  Odevzdaná jídla: ' + r.delivered + '  ·  Propadlé: ' + r.expired + '  ·  Zbylo: ' + r.money + ' Kč'
+    : 'Odevzdaná jídla: ' + r.delivered + '  ·  Propadlé objednávky: ' + r.expired;
   $('againBtn').disabled = !roomInfo || roomInfo.players.length < roomInfo.min;
   setView('end');
 });
+
+/* ---------------------------------------------------------------------
+ *  Obchod mezi dny (režim „Dny“)
+ * ------------------------------------------------------------------- */
+const SHOP_ORDER = ['bun', 'meat', 'cheese', 'lettuce', 'tomato'];
+
+socket.on('shop', (d) => {
+  shopData = d;
+  if (view !== 'shop') { resetKeys(); setView('shop'); }
+  renderShop(d);
+});
+
+function renderShop(d) {
+  const sm = d.summary;
+  $('shopTitle').textContent = sm ? 'Den ' + sm.day + ' skončil' : 'Objednávka surovin';
+  $('shopSummary').textContent = sm
+    ? 'Výdělek ' + (sm.net >= 0 ? '+' : '') + sm.net + ' Kč  ·  Nájem −' + sm.rent + ' Kč  ·  Odevzdáno ' + sm.delivered + '  ·  Propadlo ' + sm.expired
+    : '';
+  $('shopMoney').textContent = d.money;
+  $('shopRent').textContent = 'Nájem za den ' + d.day + ': ' + d.rent + ' Kč – nech si na něj!';
+  const box = $('shopItems');
+  box.innerHTML = '';
+  SHOP_ORDER.forEach((k) => {
+    const have = d.stock[k] || 0, price = d.prices[k];
+    const row = document.createElement('div');
+    row.className = 'shoprow';
+    const nm = document.createElement('span');
+    nm.className = 'sname'; nm.textContent = ICONS[k] + ' ' + NAMES[k];
+    const st = document.createElement('span');
+    st.className = 'sstock' + (have === 0 ? ' zero' : ''); st.textContent = 'sklad ' + have;
+    const pr = document.createElement('span');
+    pr.className = 'sprice'; pr.textContent = price + ' Kč';
+    row.append(nm, st, pr);
+    [1, 5].forEach((n) => {
+      const b = document.createElement('button');
+      b.className = 'btn small'; b.textContent = '+' + n;
+      b.disabled = price * n > d.money || have + n > d.cap;
+      b.onclick = () => { Sound.init(); socket.emit('buy', { k, n }); };
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+  });
+  const mine = d.ready.includes(myId);
+  $('readyBtn').textContent = mine ? '✔ Připraven (zrušit)' : 'Připraven na den ' + d.day;
+  $('readyBtn').classList.toggle('primary', !mine);
+  $('shopReady').textContent = d.players > 1 ? 'Připraveno ' + d.ready.length + ' / ' + d.players + ' – den začne, až budou všichni.' : '';
+}
+$('readyBtn').onclick = () => { Sound.init(); socket.emit('ready'); };
+$('shopLeave').onclick = leaveRoom;
+
+function updateRoomLabel() {
+  let t = roomInfo ? 'MÍSTNOST ' + roomInfo.code : '';
+  if (gameMode === 'days') t += '  ·  DEN ' + dayNo;
+  $('roomLbl').textContent = t;
+}
 
 /* ---------------------------------------------------------------------
  *  Vstup: klávesnice + myš (pohled z první osoby)
@@ -477,9 +570,9 @@ function reconcile(p) {
 function handleEvents(list) {
   for (const e of list) {
     switch (e.e) {
-      case 'serve': Sound.play('serve'); float(e.x, 1.5, e.y, '+' + e.v, '#8dff9f'); break;
+      case 'serve': Sound.play('serve'); float(e.x, 1.5, e.y, '+' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
       case 'no': Sound.play('no'); if (e.m) float(e.x, 1.5, e.y, e.m, '#ff9a90'); break;
-      case 'expire': Sound.play('expire'); floatFixed('Objednávka propadla!  −5', '#ff9a90'); break;
+      case 'expire': Sound.play('expire'); floatFixed('Objednávka propadla!  −5' + (gameMode === 'days' ? ' Kč' : ''), '#ff9a90'); break;
       case 'go': {
         Sound.play('go');
         const g = $('goText');
@@ -533,7 +626,7 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', () => { if (view === 'game' || view === 'end') resize(); });
+window.addEventListener('resize', () => { if (view === 'game' || view === 'end' || view === 'shop') resize(); });
 
 /* ---------- pomocníci pro tvorbu mesh ---------- */
 const matCache = {}, geoCache = {};
@@ -739,6 +832,7 @@ function buildKitchen() {
         const lb = labelSprite(NAMES[k], '#fff', 0.95);
         lb.position.set(cx, TOP + 0.75, cz + 0.2);
         kitchen.add(lb);
+        addText(x, y, 'stock', k);
         continue;
       }
       switch (ch) {
@@ -826,8 +920,8 @@ function addBar(x, y, ch) {
   const el = mkEl('bar hidden', '<i></i><span></span>');
   barEls.push({ key: x + ',' + y, ch, x, y, el, fill: el.firstChild, txt: el.lastChild });
 }
-function addText(x, y, kind) {
-  textEls.push({ x, y, kind, el: mkEl('tag hidden'), last: '' });
+function addText(x, y, kind, k) {
+  textEls.push({ x, y, kind, k, el: mkEl('tag hidden'), last: '' });
 }
 
 /* ---------- dynamické předměty na stanicích ---------- */
@@ -992,7 +1086,7 @@ function updateHud() {
   const ts = '⏱ ' + Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
   if (ts !== hudCache.t) { hudCache.t = ts; $('timer').textContent = ts; }
   $('timer').classList.toggle('low', snap.t <= 10 && snap.cd === 0);
-  const sc = 'Skóre ' + snap.sc;
+  const sc = gameMode === 'days' ? '💰 ' + snap.sc + ' Kč' : 'Skóre ' + snap.sc;
   if (sc !== hudCache.sc) { hudCache.sc = sc; $('score').textContent = sc; }
 
   const cdEl = $('countdown');
@@ -1081,6 +1175,15 @@ function updateOverlays() {
   }
   // počty talířů
   for (const t of textEls) {
+    if (t.kind === 'stock') {
+      if (!snap.sk) { t.el.classList.add('hidden'); continue; }
+      const n = snap.sk[t.k] || 0;
+      const label = '×' + n;
+      if (label !== t.last) { t.last = label; t.el.textContent = label; t.el.classList.toggle('zero', n === 0); }
+      t.el.classList.remove('hidden');
+      place(t.el, t.x + 0.5, TOP + 1.05, t.y + 0.5);
+      continue;
+    }
     const n = t.kind === 'plates' ? snap.d : snap.w;
     const label = (t.kind === 'plates' ? '🍽 ×' : '🧼 ×') + n;
     if (t.kind === 'dirty' && n === 0) { t.el.classList.add('hidden'); continue; }
@@ -1159,7 +1262,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
   lastFrame = now;
-  if ((view !== 'game' && view !== 'end') || !map || !snap || !kitchen) return;
+  if ((view !== 'game' && view !== 'end' && view !== 'shop') || !map || !snap || !kitchen) return;
   update(dt);
   updateCamera(now / 1000);
   syncChefs(dt);

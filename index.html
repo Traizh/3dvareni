@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Šílená kuchyně 3D</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Úvodní menu: přezdívka + kód místnosti -->
+  <main id="menu" class="panel">
+    <h1>🍔 Šílená kuchyně 3D</h1>
+    <p class="sub">Kooperativní vaření pro 2–4 kuchaře</p>
+
+    <p id="netStatus" class="net wait">⏳ Načítám hru…</p>
+
+    <label for="nameInput">Přezdívka</label>
+    <input id="nameInput" type="text" maxlength="12" placeholder="např. Šéfkuchař" autocomplete="off">
+
+    <label for="codeInput">Kód místnosti</label>
+    <input id="codeInput" type="text" maxlength="6" placeholder="např. ABCD" autocomplete="off">
+
+    <div class="row">
+      <button id="joinBtn" class="btn" disabled>Připojit se</button>
+      <button id="createBtn" class="btn primary" disabled>Vytvořit novou místnost</button>
+    </div>
+    <p id="menuError" class="error"></p>
+
+    <div class="help">
+      <b>Ovládání</b><br>
+      Pohyb: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> nebo šipky<br>
+      Interakce: <kbd>E</kbd> nebo <kbd>mezerník</kbd> – zvednout / položit.<br>
+      Krájení a mytí: u prkénka / dřezu <b>podrž</b> nebo <b>mačkej</b> interakci.<br>
+      Maso: nakrájej → opeč na sporáku → pozor, ať se nespálí!
+    </div>
+  </main>
+
+  <!-- Lobby -->
+  <section id="lobby" class="panel hidden">
+    <h1>Lobby</h1>
+    <p class="sub">Kód místnosti</p>
+    <div id="roomCode" class="code">----</div>
+    <button id="copyLink" class="btn small">📋 Zkopírovat odkaz</button>
+
+    <ul id="playerList" class="players"></ul>
+    <p id="lobbyHint" class="hint"></p>
+
+    <div class="row">
+      <button id="leaveLobby" class="btn">Odejít</button>
+      <button id="startBtn" class="btn primary" disabled>Spustit hru</button>
+    </div>
+  </section>
+
+  <!-- Hra (3D plátno + HTML HUD) -->
+  <div id="gameWrap" class="hidden">
+    <canvas id="game"></canvas>
+    <div id="ui">
+      <div id="topbar">
+        <div id="timer">⏱ 3:00</div>
+        <div id="roomLbl">MÍSTNOST</div>
+        <div id="score">Skóre 0</div>
+      </div>
+      <div id="orders" class="empty"></div>
+      <div id="world"></div>
+      <div id="countdown" class="hidden"><b>3</b><span>Připrav se, kuchaři!</span></div>
+      <div id="goText">Vaříme!</div>
+    </div>
+    <div class="corner">
+      <button id="muteBtn" class="chip" title="Zvuk">🔊</button>
+      <button id="leaveGame" class="chip" title="Opustit hru">🚪</button>
+    </div>
+  </div>
+
+  <!-- Závěrečné skóre -->
+  <div id="endScreen" class="overlay hidden">
+    <div class="panel">
+      <h1>Konec směny!</h1>
+      <div id="stars" class="stars">☆☆☆</div>
+      <div class="sub">Týmové skóre</div>
+      <div id="endScore" class="bigscore">0</div>
+      <p id="endStats" class="hint"></p>
+      <div class="row">
+        <button id="againBtn" class="btn primary">Nová hra</button>
+        <button id="toLobbyBtn" class="btn">Zpět do lobby</button>
+      </div>
+      <button id="endLeaveBtn" class="btn small">Odejít</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- Three.js a Socket.io si hra načte sama (s několika záložními zdroji) -->
+  <script src="game.js"></script>
+</body>
+</html>

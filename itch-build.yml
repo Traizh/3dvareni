@@ -1,0 +1,31 @@
+name: Itch.io build
+
+on:
+  push:
+    branches: [main]
+    paths: ['public/**']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zabalit public/ do itch-build.zip
+        run: cd public && zip -r ../itch-build.zip . -x '.*'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: itch-build
+          path: itch-build.zip
+
+      # Volitelné: automatický upload na itch.io (nastav secret BUTLER_API_KEY a variable ITCH_TARGET, např. uzivatel/hra:html5)
+      - name: Push na itch.io (butler)
+        if: ${{ vars.ITCH_TARGET != '' }}
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          curl -sL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip -d butler && chmod +x butler/butler
+          ./butler/butler push public "${{ vars.ITCH_TARGET }}"

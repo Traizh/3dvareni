@@ -1,0 +1,255 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  color: #fff4dc;
+  background: radial-gradient(circle at 20% 10%, #4b2e1e 0, #24160f 55%, #150c08 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Panely (menu, lobby, konec) ---------- */
+.panel {
+  width: min(94vw, 470px);
+  max-height: 96vh;
+  overflow-y: auto;
+  padding: 26px 26px 22px;
+  background: rgba(38, 25, 18, 0.94);
+  border: 2px solid #7a4a25;
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), inset 0 0 0 2px rgba(255, 200, 120, 0.08);
+  text-align: center;
+}
+
+h1 { font-size: 2rem; letter-spacing: 0.5px; color: #ffd27a; text-shadow: 0 3px 0 #6b3d17; }
+.sub { margin: 4px 0 18px; color: #d9b98a; font-size: 0.95rem; }
+.hint { margin: 10px 0 14px; color: #d9b98a; font-size: 0.9rem; min-height: 1.2em; }
+.error { margin-top: 10px; min-height: 1.2em; color: #ff8a80; font-size: 0.9rem; }
+
+label {
+  display: block;
+  text-align: left;
+  margin: 12px 0 5px;
+  font-size: 0.85rem;
+  color: #e7c58f;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+input {
+  width: 100%;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 1.05rem;
+  color: #fff4dc;
+  background: #1c120c;
+  border: 2px solid #5f3a1e;
+  border-radius: 12px;
+  outline: none;
+}
+input:focus { border-color: #ffb347; }
+#codeInput { text-transform: uppercase; letter-spacing: 3px; }
+
+/* ---------- Tlačítka ---------- */
+.row { display: flex; gap: 10px; margin-top: 18px; }
+.row .btn { flex: 1; }
+
+.btn {
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 700;
+  color: #fff4dc;
+  background: #5b3a22;
+  border: 2px solid #86562f;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.08s, filter 0.15s;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+.btn:active:not(:disabled) { transform: translateY(2px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: linear-gradient(#ff9d2e, #e5731a); border-color: #ffc16b; color: #2b1305; }
+.btn.small { padding: 7px 12px; font-size: 0.85rem; margin-top: 12px; }
+
+.help {
+  margin-top: 20px;
+  padding: 12px 14px;
+  text-align: left;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: #d9b98a;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+}
+kbd {
+  display: inline-block;
+  min-width: 22px;
+  margin: 0 2px;
+  padding: 0 5px;
+  text-align: center;
+  font: 700 0.78rem monospace;
+  color: #2b1305;
+  background: #ffd9a0;
+  border-radius: 5px;
+  box-shadow: 0 2px 0 #a8742e;
+}
+
+/* ---------- Lobby ---------- */
+.code {
+  margin: 4px 0 6px;
+  font-size: 3.2rem;
+  font-weight: 800;
+  letter-spacing: 10px;
+  padding-left: 10px;
+  color: #fff;
+  text-shadow: 0 4px 0 #6b3d17;
+}
+
+.players { list-style: none; margin-top: 16px; }
+.players li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  font-weight: 700;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 12px;
+}
+.players li.empty { color: #8f7355; font-weight: 400; font-style: italic; }
+.hat {
+  width: 22px;
+  height: 22px;
+  border-radius: 50% 50% 40% 40%;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- Hra (3D) ---------- */
+#gameWrap {
+  position: fixed;
+  inset: 0;
+  background: #120a06;
+}
+canvas#game { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+#ui { position: absolute; inset: 0; pointer-events: none; overflow: hidden; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; }
+#world { position: absolute; inset: 0; }
+.corner { position: fixed; right: 10px; bottom: 10px; display: flex; gap: 8px; z-index: 5; }
+.chip {
+  width: 40px;
+  height: 40px;
+  font-size: 1.1rem;
+  color: #fff;
+  background: rgba(40, 26, 18, 0.85);
+  border: 2px solid #7a4a25;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.chip:hover { filter: brightness(1.3); }
+
+/* ---------- Závěrečné skóre ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 5, 3, 0.72);
+  backdrop-filter: blur(3px);
+}
+.stars { margin: 6px 0; font-size: 2.6rem; letter-spacing: 6px; color: #ffcc33; text-shadow: 0 3px 0 #8a5a00; }
+.bigscore { font-size: 4.4rem; font-weight: 800; line-height: 1.1; color: #fff; text-shadow: 0 4px 0 #6b3d17; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 20;
+  max-width: 90vw;
+  padding: 10px 18px;
+  font-weight: 700;
+  color: #2b1305;
+  background: #ffd27a;
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -20px);
+  transition: opacity 0.2s, transform 0.2s;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.bad { color: #fff; background: #c0392b; }
+
+/* ---------- Stav připojení ---------- */
+.net { margin: 0 0 6px; padding: 8px 12px; font-size: 0.85rem; border-radius: 10px; background: rgba(0,0,0,.28); }
+.net.ok { color: #9dffb0; }
+.net.wait { color: #ffd27a; }
+.net.bad { color: #ff9a90; }
+
+/* ---------- HUD ---------- */
+#topbar {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 16px;
+  background: linear-gradient(rgba(20,10,5,.85), rgba(20,10,5,0));
+  font-weight: 800; text-shadow: 0 2px 0 rgba(0,0,0,.6);
+}
+#timer { font-size: 1.5rem; color: #ffe9b0; min-width: 110px; }
+#timer.low { color: #ff5252; animation: blink .6s steps(2) infinite; }
+#roomLbl { font-size: 0.8rem; letter-spacing: 1px; color: #b79a75; }
+#score { font-size: 1.5rem; color: #9dffb0; min-width: 110px; text-align: right; }
+@keyframes blink { 50% { color: #ffd2d2; } }
+
+#orders {
+  position: absolute; top: 46px; left: 0; right: 0;
+  display: flex; gap: 8px; justify-content: center; flex-wrap: nowrap;
+  padding: 0 8px;
+}
+#orders.empty::before { content: "Čekáme na první objednávku…"; color: #b79a75; font-style: italic; font-size: 0.9rem; }
+.order {
+  width: 138px; padding: 6px 8px 8px; border-radius: 10px;
+  background: #f7ecd2; color: #3a2615; box-shadow: 0 4px 12px rgba(0,0,0,.45);
+}
+.order b { display: block; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.order .oi { margin: 3px 0 5px; font-size: 1.15rem; letter-spacing: 1px; white-space: nowrap; }
+.order .ot { height: 6px; border-radius: 3px; background: rgba(0,0,0,.18); overflow: hidden; }
+.order .ot i { display: block; height: 100%; border-radius: 3px; }
+.order.urgent { animation: shake .5s infinite; }
+@keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+
+/* ---------- Popisky ve 3D světě ---------- */
+.bar, .tag, .nametag, .float { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform; }
+.bar { width: 54px; height: 9px; border-radius: 5px; background: rgba(0,0,0,.78); padding: 1px; }
+.bar i { display: block; height: 100%; border-radius: 4px; }
+.bar span { position: absolute; left: 50%; top: -16px; transform: translateX(-50%); font-size: 0.7rem; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
+.tag { padding: 1px 7px; font-size: 0.78rem; font-weight: 800; color: #fff; background: rgba(0,0,0,.6); border-radius: 8px; }
+.nametag { font-size: 0.8rem; font-weight: 800; color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 2px #000; }
+.float { font-size: 1.15rem; font-weight: 800; text-shadow: 0 0 4px #000, 0 0 4px #000; }
+
+#countdown {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45); color: #fff;
+}
+#countdown b { font-size: 8rem; line-height: 1; text-shadow: 0 6px 0 rgba(0,0,0,.5); }
+#countdown span { font-size: 1.6rem; font-weight: 800; color: #ffd27a; }
+#goText {
+  position: absolute; left: 0; right: 0; top: 42%; text-align: center; opacity: 0;
+  font-size: 4rem; font-weight: 800; color: #ffd27a; text-shadow: 0 4px 0 rgba(0,0,0,.7), 0 0 20px rgba(0,0,0,.6);
+}
+#goText.show { animation: go .9s ease-out forwards; }
+@keyframes go { 0% { opacity: 1; transform: scale(.6); } 30% { transform: scale(1.1); } 100% { opacity: 0; transform: scale(1.2); } }
+
+@media (max-width: 700px) {
+  .order { width: 96px; }
+  .order .oi { font-size: .9rem; }
+  #timer, #score { font-size: 1.1rem; min-width: 70px; }
+}

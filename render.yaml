@@ -1,0 +1,10 @@
+# Render Blueprint – po propojení GitHub repozitáře se služba vytvoří/aktualizuje sama
+services:
+  - type: web
+    name: threedvareni            # => https://threedvareni.onrender.com
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true

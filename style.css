@@ -285,3 +285,33 @@ canvas#game { cursor: crosshair; }
 .shoprow .sprice { width: 52px; text-align: right; font-weight: 700; color: #ffd27a; }
 .shoprow .btn.small { margin-top: 0; min-width: 44px; }
 .tag.zero { background: #b3261e; }
+
+/* ---------- Chaos, cíl, hasicák ---------- */
+#goal { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); margin-top: 84px; padding: 4px 14px; border-radius: 999px;
+  background: rgba(0,0,0,.6); color: #ffe9b0; font-weight: 800; font-size: .85rem; white-space: nowrap; }
+#goal.done { background: rgba(30,110,50,.85); color: #d8ffdf; }
+#goal.failed { background: rgba(130,30,30,.85); color: #ffd6d2; text-decoration: line-through; }
+#banner { position: absolute; left: 50%; top: 20%; transform: translateX(-50%) scale(.8); padding: 10px 22px; border-radius: 14px; opacity: 0;
+  background: linear-gradient(#ff5a36, #c62a14); color: #fff; font-weight: 800; font-size: 1.25rem; text-shadow: 0 2px 0 rgba(0,0,0,.5);
+  box-shadow: 0 6px 24px rgba(0,0,0,.5); transition: opacity .25s, transform .25s; white-space: nowrap; }
+#banner.show { opacity: 1; transform: translateX(-50%) scale(1); animation: bannerPulse 1s ease-in-out infinite; }
+@keyframes bannerPulse { 50% { filter: brightness(1.25); } }
+#extInfo { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
+  background: rgba(190,30,30,.85); color: #fff; font-weight: 800; font-size: .9rem; white-space: nowrap; }
+.firebar { width: 46px; }
+.order.vip { background: linear-gradient(#fff2b8, #f3d36a); box-shadow: 0 0 0 2px #ffb300, 0 4px 12px rgba(0,0,0,.45); }
+.order .of.done, .order .od.done { opacity: .28; text-decoration: line-through; }
+.order .oi { display: flex; gap: 8px; align-items: center; }
+
+/* ---------- Obchod: nové části ---------- */
+.panel.wide { max-height: 92vh; overflow-y: auto; }
+#shopSummary { white-space: pre-line; }
+.shophead { margin: 14px 0 2px; font-size: 1rem; color: #ffd27a; text-align: left; }
+.shophead small { color: #b79a75; font-weight: 400; }
+.nextline { margin-top: 6px; padding: 8px 12px; background: rgba(255,210,122,.12); border: 1px solid rgba(255,210,122,.35); border-radius: 12px; text-align: left; }
+.nextline b { display: block; color: #ffd27a; }
+.nextline span { font-size: .82rem; color: #e6d2b0; }
+.shoprow .sprice.sale { color: #8dff9f; }
+.shoprow .sprice.dear { color: #ff9a90; }
+.shoprow.upg .sname small { display: block; font-weight: 400; font-size: .75rem; color: #d9b98a; }
+.shoprow.upg .btn.small { min-width: 78px; }

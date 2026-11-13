@@ -61,8 +61,10 @@ const THREE = window.THREE;
 const COLS = 16, ROWS = 10;
 const SPEED = 4.6, HALF = 0.3, REACH = 0.75;
 const TOP = 0.98;                                   // výška pracovních desek
-const NAMES = { bun: 'Houska', meat: 'Maso', cheese: 'Sýr', lettuce: 'Salát', tomato: 'Rajče' };
-const ICONS = { bun: '🍞', meat: '🥩', cheese: '🧀', lettuce: '🥬', tomato: '🍅' };
+const NAMES = { bun: 'Houska', meat: 'Maso', cheese: 'Sýr', lettuce: 'Salát', tomato: 'Rajče', cola: 'Cola', lemon: 'Limonáda', juice: 'Džus' };
+const ICONS = { bun: '🍞', meat: '🥩', cheese: '🧀', lettuce: '🥬', tomato: '🍅', cola: '🥤', lemon: '🍋', juice: '🍊' };
+const DRINK_COL = { cola: '#3b1d0e', lemon: '#eef266', juice: '#ff9a1f' };
+const TAP = { A: 'cola', E: 'lemon', O: 'juice' };
 const CRATE = { B: 'bun', M: 'meat', S: 'cheese', L: 'lettuce', T: 'tomato' };
 const PLATE_STATE = { bun: 'raw', meat: 'cooked', cheese: 'raw', lettuce: 'chopped', tomato: 'chopped' };
 
@@ -76,7 +78,7 @@ const Sound = (() => {
   let muted = false;
   try { muted = localStorage.getItem('kuchyne-muted') === '1'; } catch (e) { /* nic */ }
   const lastPlayed = {};
-  const MIN_GAP = { chop: 70, wash: 110, warn: 700, pick: 40, drop: 40, tick: 300 };
+  const MIN_GAP = { chop: 70, wash: 110, warn: 700, pick: 40, drop: 40, tick: 300, pour: 130, spray: 140, nibble: 350, fire: 500, squeak: 250 };
 
   function init() {
     if (!ac) {
@@ -134,6 +136,15 @@ const Sound = (() => {
     tick() { tone(900, 0.05, 'square', 0.045); },
     count() { tone(520, 0.14, 'sine', 0.13); },
     go() { tone(784, 0.3, 'triangle', 0.14); tone(1175, 0.45, 'triangle', 0.14, null, 0.13); },
+    pour() { noise(0.12, 0.08, 1800); tone(520, 0.1, 'sine', 0.05, 700); },
+    fire() { noise(0.6, 0.14, 380); tone(180, 0.5, 'sawtooth', 0.09, 90); tone(520, 0.12, 'square', 0.06, null, 0.05); },
+    spray() { noise(0.16, 0.13, 3800); },
+    extinguish() { noise(0.5, 0.12, 2200); tone(660, 0.18, 'triangle', 0.12); tone(990, 0.28, 'triangle', 0.12, null, 0.12); },
+    squeak() { tone(2100, 0.07, 'square', 0.05, 2900); tone(2600, 0.09, 'square', 0.05, 1900, 0.09); },
+    nibble() { noise(0.04, 0.12, 2600); noise(0.04, 0.1, 2400, 0.07); },
+    splat() { noise(0.14, 0.15, 500); tone(240, 0.16, 'sine', 0.12, 80); },
+    ratsteal() { tone(300, 0.3, 'sawtooth', 0.1, 140); tone(2100, 0.07, 'square', 0.05, 2900, 0.2); },
+    chaos() { tone(440, 0.18, 'sawtooth', 0.09); tone(330, 0.18, 'sawtooth', 0.09, null, 0.18); tone(550, 0.3, 'sawtooth', 0.09, null, 0.36); },
     end() { tone(660, 0.25, 'triangle', 0.13); tone(520, 0.25, 'triangle', 0.13, null, 0.22); tone(392, 0.5, 'triangle', 0.13, null, 0.44); },
   };
   return {
@@ -170,6 +181,7 @@ let lastCd = null, lastTick = null;
 let gameMode = 'classic', dayNo = 1;   // režim aktuální hry
 let menuMode = 'classic';               // režim vybraný v menu
 let shopData = null;
+let speedMult = 1;                       // vylepšení bot
 
 /* ---------------------------------------------------------------------
  *  Socket + stav připojení
@@ -350,6 +362,7 @@ socket.on('disconnect', () => {
 socket.on('gameStart', (d) => {
   map = d.map; recipes = d.recipes;
   gameMode = d.mode || 'classic'; dayNo = d.day || 1;
+  speedMult = 1 + 0.08 * ((d.up && d.up.boots) || 0);
   snap = null; me = null; floaters.forEach((f) => f.el.remove()); floaters = [];
   clearActors();
   lastCd = null; lastTick = null;
@@ -379,7 +392,7 @@ socket.on('gameEnd', (r) => {
 /* ---------------------------------------------------------------------
  *  Obchod mezi dny (režim „Dny“)
  * ------------------------------------------------------------------- */
-const SHOP_ORDER = ['bun', 'meat', 'cheese', 'lettuce', 'tomato'];
+const SHOP_ORDER = ['bun', 'meat', 'cheese', 'lettuce', 'tomato', 'cola', 'lemon', 'juice'];
 
 socket.on('shop', (d) => {
   shopData = d;
@@ -390,15 +403,41 @@ socket.on('shop', (d) => {
 function renderShop(d) {
   const sm = d.summary;
   $('shopTitle').textContent = sm ? 'Den ' + sm.day + ' skončil' : 'Objednávka surovin';
-  $('shopSummary').textContent = sm
-    ? 'Výdělek ' + (sm.net >= 0 ? '+' : '') + sm.net + ' Kč  ·  Nájem −' + sm.rent + ' Kč  ·  Odevzdáno ' + sm.delivered + '  ·  Propadlo ' + sm.expired
-    : '';
+  const lines = [];
+  if (sm) {
+    lines.push('Výdělek ' + (sm.net >= 0 ? '+' : '') + sm.net + ' Kč  ·  Nájem −' + sm.rent + ' Kč  ·  Odevzdáno ' + sm.delivered + '  ·  Propadlo ' + sm.expired);
+    if (sm.goal) lines.push('🎯 ' + sm.goal.text + ': ' + (sm.goal.ok ? '✔ splněno, bonus +' + sm.goal.reward + ' Kč' : '✘ nesplněno'));
+    if (sm.stat) lines.push('🍔 ' + sm.stat.dishes + '  ·  🥤 ' + sm.stat.drinks + '  ·  🐀 zabito ' + sm.stat.rats + '  ·  🧯 uhašeno ' + sm.stat.fires);
+  }
+  $('shopSummary').textContent = lines.join('\n');
   $('shopMoney').textContent = d.money;
   $('shopRent').textContent = 'Nájem za den ' + d.day + ': ' + d.rent + ' Kč – nech si na něj!';
+
+  // zítřek: modifikátor a cíl
+  const nx = $('shopNext');
+  nx.innerHTML = '';
+  if (d.today) {
+    const t = document.createElement('div');
+    t.className = 'nextline';
+    const b1 = document.createElement('b'); b1.textContent = '📅 Den ' + d.day + ': ' + d.today.n;
+    const sp = document.createElement('span'); sp.textContent = d.today.d;
+    t.append(b1, sp);
+    nx.appendChild(t);
+  }
+  if (d.goal) {
+    const t = document.createElement('div');
+    t.className = 'nextline';
+    const b1 = document.createElement('b'); b1.textContent = '🎯 Cíl dne: ' + d.goal.text;
+    const sp = document.createElement('span'); sp.textContent = 'Bonus +' + d.goal.reward + ' Kč při splnění.';
+    t.append(b1, sp);
+    nx.appendChild(t);
+  }
+
+  // suroviny (ceny se každý den mění)
   const box = $('shopItems');
   box.innerHTML = '';
   SHOP_ORDER.forEach((k) => {
-    const have = d.stock[k] || 0, price = d.prices[k];
+    const have = d.stock[k] || 0, price = d.prices[k], base = d.base ? d.base[k] : price;
     const row = document.createElement('div');
     row.className = 'shoprow';
     const nm = document.createElement('span');
@@ -406,7 +445,8 @@ function renderShop(d) {
     const st = document.createElement('span');
     st.className = 'sstock' + (have === 0 ? ' zero' : ''); st.textContent = 'sklad ' + have;
     const pr = document.createElement('span');
-    pr.className = 'sprice'; pr.textContent = price + ' Kč';
+    pr.className = 'sprice' + (price < base ? ' sale' : price > base ? ' dear' : '');
+    pr.textContent = (price < base ? '▼ ' : price > base ? '▲ ' : '') + price + ' Kč';
     row.append(nm, st, pr);
     [1, 5].forEach((n) => {
       const b = document.createElement('button');
@@ -417,6 +457,27 @@ function renderShop(d) {
     });
     box.appendChild(row);
   });
+
+  // trvalá vylepšení
+  const ub = $('shopUp');
+  ub.innerHTML = '';
+  (d.up || []).forEach((u) => {
+    const row = document.createElement('div');
+    row.className = 'shoprow upg';
+    const nm = document.createElement('span');
+    nm.className = 'sname';
+    const t1 = document.createElement('b'); t1.textContent = u.icon + ' ' + u.name + '  ' + '●'.repeat(u.lvl) + '○'.repeat(u.max - u.lvl);
+    const t2 = document.createElement('small'); t2.textContent = u.desc;
+    nm.append(t1, t2);
+    row.appendChild(nm);
+    const b = document.createElement('button');
+    b.className = 'btn small';
+    if (u.next === null) { b.textContent = 'MAX'; b.disabled = true; }
+    else { b.textContent = u.next + ' Kč'; b.disabled = u.next > d.money; b.onclick = () => { Sound.init(); socket.emit('upgrade', { id: u.id }); }; }
+    row.appendChild(b);
+    ub.appendChild(row);
+  });
+
   const mine = d.ready.includes(myId);
   $('readyBtn').textContent = mine ? '✔ Připraven (zrušit)' : 'Připraven na den ' + d.day;
   $('readyBtn').classList.toggle('primary', !mine);
@@ -579,6 +640,12 @@ function handleEvents(list) {
         g.classList.remove('show'); void g.offsetWidth; g.classList.add('show');
         break;
       }
+      case 'fire': Sound.play('fire'); float(e.x, 1.6, e.y, '🔥 Hoří!', '#ffb347'); break;
+      case 'extinguish': Sound.play('extinguish'); float(e.x, 1.6, e.y, '✔ Uhašeno!', '#8dff9f'); break;
+      case 'splat': Sound.play('splat'); float(e.x, 0.6, e.y, '🐀 +' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
+      case 'ratsteal': Sound.play('ratsteal'); if (e.m) float(e.x, 1.5, e.y, '🐀 ' + e.m, '#ff9a90'); break;
+      case 'chaos': Sound.play('chaos'); break;
+      case 'order': Sound.play('order'); break;
       default: Sound.play(e.e);
     }
   }
@@ -605,7 +672,11 @@ fpHeld.rotation.set(0.25, -0.35, 0);
 camera.add(fpHeld);
 let fpSig = '';
 
-scene.add(new THREE.HemisphereLight(0xfff2dd, 0x6a5646, 1.0));
+const hemi = new THREE.HemisphereLight(0xfff2dd, 0x6a5646, 1.0);
+scene.add(hemi);
+const torch = new THREE.PointLight(0xfff0cc, 0, 10);      // baterka při výpadku proudu
+camera.add(torch);
+let dark = 0;
 const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(4, 14, 9);
 sun.target.position.set(8, 0, 5);
@@ -748,7 +819,30 @@ function makePlate(content, dirty) {
   return g;
 }
 // item = { t:'i', k, s } nebo { t:'p', c:[...] }
+function makeCup(d) {
+  const g = new THREE.Group();
+  M(geo('Cylinder', 0.3, 0.22, 0.7, 14, 1, true), '#ffffff', 0, 0.35, 0, g, { noShadow: true, mat: { transparent: true, opacity: 0.32, side: THREE.DoubleSide } });
+  M(geo('Cylinder', 0.22, 0.22, 0.03, 14), '#dfe8ee', 0, 0.015, 0, g);
+  M(geo('Cylinder', 0.31, 0.31, 0.03, 14), '#ffffff', 0, 0.7, 0, g, { noShadow: true, mat: { transparent: true, opacity: 0.55 } });
+  if (d) {
+    M(geo('Cylinder', 0.27, 0.225, 0.5, 14), DRINK_COL[d] || '#888', 0, 0.28, 0, g, { noShadow: true });
+    M(geo('Box', 0.04, 0.55, 0.04), '#ff4d6d', 0.1, 0.72, 0, g, { noShadow: true }).rotation.z = -0.25;
+  }
+  return g;
+}
+function makeExt() {
+  const g = new THREE.Group();
+  M(geo('Cylinder', 0.17, 0.17, 0.62, 14), '#d32f2f', 0, 0.34, 0, g);
+  M(geo('Cylinder', 0.17, 0.17, 0.05, 14), '#222222', 0, 0.04, 0, g);
+  M(geo('Cylinder', 0.06, 0.12, 0.14, 10), '#222222', 0, 0.71, 0, g);
+  M(geo('Box', 0.08, 0.06, 0.26), '#222222', 0, 0.82, 0.06, g);
+  M(geo('Box', 0.05, 0.05, 0.2), '#555555', 0, 0.74, 0.16, g);
+  M(geo('Sphere', 0.045, 8, 6), '#fdd835', 0.12, 0.55, 0.1, g, { noShadow: true });
+  return g;
+}
 function makeItem(item) {
+  if (item.t === 'c') { const c = makeCup(item.d); c.scale.setScalar(0.8); return c; }
+  if (item.t === 'x') { const e = makeExt(); e.scale.setScalar(0.75); return e; }
   if (item.t === 'p') { const p = makePlate(item.c, false); p.scale.setScalar(0.74); return p; }
   const i = makeIng(item.k, item.s);
   i.scale.setScalar(0.5);
@@ -762,6 +856,8 @@ let barEls = [];              // { key, ch, el, fill, txt }
 let textEls = [];             // { el, wx, wy, wz, key, kind }
 let hilite = null;
 const world = $('world');
+const fireObjs = new Map();   // 'x,y' -> { g, flames, smoke, bar, fill }
+const ratObjs = new Map();    // id -> { g, x, y, tx, ty, a, ta, st, phase }
 
 function mkEl(cls, html) {
   const e = document.createElement('div');
@@ -780,6 +876,7 @@ function buildKitchen() {
   if (kitchen) scene.remove(kitchen);
   world.innerHTML = '';
   barEls = []; textEls = []; dyn = {};
+  fireObjs.clear(); ratObjs.clear();
   kitchen = new THREE.Group();
   scene.add(kitchen);
 
@@ -869,6 +966,42 @@ function buildKitchen() {
           kitchen.add(lb);
           break;
         }
+        case 'U': {
+          counter(kitchen, x, y);
+          for (let i = 0; i < 4; i++) {
+            const cup = makeCup(null);
+            cup.scale.setScalar(0.62);
+            cup.position.set(cx + (i % 2 ? 0.2 : -0.2), TOP, cz + (i < 2 ? -0.18 : 0.2));
+            kitchen.add(cup);
+          }
+          const lb = labelSprite('KELÍMKY', '#fff', 0.95);
+          lb.position.set(cx, TOP + 0.95, cz);
+          kitchen.add(lb);
+          break;
+        }
+        case 'A': case 'E': case 'O': {
+          const dk = TAP[ch];
+          counter(kitchen, x, y);
+          M(geo('Box', 0.84, 0.8, 0.46), '#2f3640', cx, TOP + 0.4, cz - 0.24, kitchen);
+          M(geo('Box', 0.7, 0.34, 0.04), DRINK_COL[dk], cx, TOP + 0.5, cz + 0.0, kitchen, { noShadow: true, mat: { emissive: DRINK_COL[dk] } });
+          M(geo('Cylinder', 0.05, 0.05, 0.2, 8), '#aab4bd', cx, TOP + 0.7, cz + 0.06, kitchen);
+          M(geo('Box', 0.5, 0.04, 0.4), '#555d66', cx, TOP + 0.02, cz + 0.2, kitchen, { noShadow: true });
+          const lb = labelSprite(NAMES[dk], '#fff', 0.95);
+          lb.position.set(cx, TOP + 1.05, cz);
+          kitchen.add(lb);
+          addBar(x, y, 'T');
+          addText(x, y, 'stock', dk);
+          break;
+        }
+        case 'Y': {
+          counter(kitchen, x, y);
+          M(geo('Box', 0.5, 0.05, 0.5), '#8d949b', cx, TOP + 0.025, cz, kitchen, { noShadow: true });
+          dyn[x + ',' + y] = { ch, x, y };
+          const lb = labelSprite('HASICÁK', '#ffb3a8', 0.95);
+          lb.position.set(cx, TOP + 1.0, cz);
+          kitchen.add(lb);
+          break;
+        }
         case 'X':
           counter(kitchen, x, y);
           M(geo('Cylinder', 0.3, 0.24, 0.52, 14), '#6b7a86', cx, TOP + 0.26, cz, kitchen);
@@ -933,6 +1066,7 @@ function updateStations(tm) {
     if (d.ch === 'C' || d.ch === 'K' || d.ch === 'F') sig = s && s.i ? JSON.stringify(s.i) : '';
     else if (d.ch === 'D') sig = String(Math.min(snap.d, 8));
     else if (d.ch === 'W') sig = String(Math.floor((snap.w + (d.wn - 1 - d.wi)) / d.wn));
+    else if (d.ch === 'Y') sig = s && s.x ? '1' : '0';
     if (sig !== d.sig) { d.sig = sig; rebuildStation(d, s); }
     if (d.ch === 'F') animateStove(d, tm);
   }
@@ -973,6 +1107,8 @@ function rebuildStation(d, s) {
         d.smoke.push(sm);
       }
     }
+  } else if (d.ch === 'Y') {
+    if (d.sig === '1') { const e = makeExt(); e.scale.setScalar(0.8); e.position.y = 0.05; d.g.add(e); }
   } else if (d.ch === 'D') {
     const n = Number(d.sig);
     for (let i = 0; i < n; i++) {
@@ -1002,6 +1138,137 @@ function animateStove(d, tm) {
       sm.material.opacity = 0.5 * (1 - ph);
     });
   }
+}
+
+/* ---------- oheň ---------- */
+const bmatCache = {};
+const bmat = (c) => bmatCache[c] || (bmatCache[c] = new THREE.MeshBasicMaterial({ color: c }));
+
+function makeFire(x, y) {
+  const g = new THREE.Group();
+  g.position.set(x + 0.5, TOP, y + 0.5);
+  const flames = [];
+  for (let i = 0; i < 10; i++) {
+    const a = i * 2.4, r = i === 0 ? 0 : 0.12 + (i % 3) * 0.1;
+    const f = new THREE.Mesh(geo('Cone', 0.13, 0.5, 6), bmat(['#ff5a00', '#ff9d00', '#ffd23a'][i % 3]));
+    f.position.set(Math.cos(a) * r, 0.2, Math.sin(a) * r);
+    g.add(f);
+    flames.push(f);
+  }
+  const smoke = [];
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(geo('Sphere', 0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#3a3a3a', transparent: true, opacity: 0.5 }));
+    m.userData.i = i;
+    g.add(m);
+    smoke.push(m);
+  }
+  const bar = mkEl('bar firebar', '<i></i><span>🔥</span>');
+  return { g, flames, smoke, bar, fill: bar.firstChild, x, y };
+}
+
+function updateFires(tm) {
+  const live = new Set();
+  for (const f of snap.fi || []) {
+    const key = f.x + ',' + f.y;
+    live.add(key);
+    let o = fireObjs.get(key);
+    if (!o) { o = makeFire(f.x, f.y); fireObjs.set(key, o); kitchen.add(o.g); }
+    const size = 0.35 + 0.65 * f.h;
+    o.flames.forEach((fl, i) => {
+      const k = size * (0.75 + 0.45 * Math.sin(tm * 11 + i * 1.9));
+      fl.scale.set(size, Math.max(0.15, k) * 1.5, size);
+      fl.position.y = 0.05 + 0.25 * Math.max(0.15, k);
+    });
+    o.smoke.forEach((m) => {
+      const ph = (tm * 0.6 + m.userData.i / 4) % 1;
+      m.position.set(Math.sin(ph * 7 + m.userData.i * 2) * 0.15, 0.5 + ph * 1.1, Math.cos(ph * 5 + m.userData.i) * 0.15);
+      m.scale.setScalar(0.8 + ph * 1.6);
+      m.material.opacity = 0.55 * (1 - ph);
+    });
+    o.fill.style.width = Math.max(4, f.h * 100) + '%';
+    place(o.bar, f.x + 0.5, TOP + 1.0, f.y + 0.5);
+  }
+  for (const [key, o] of [...fireObjs]) {
+    if (live.has(key)) continue;
+    kitchen.remove(o.g); o.bar.remove(); fireObjs.delete(key);
+  }
+}
+
+/* ---------- krysy ---------- */
+function makeRat() {
+  const g = new THREE.Group();
+  const body = new THREE.Group();
+  g.add(body);
+  const bd = M(geo('Sphere', 0.16, 10, 8), '#7b7b83', 0, 0.15, -0.02, body);
+  bd.scale.set(1, 0.8, 1.6);
+  M(geo('Sphere', 0.1, 10, 8), '#8d8d96', 0, 0.17, 0.26, body);
+  M(geo('Cone', 0.045, 0.12, 6), '#e8a0b4', 0, 0.15, 0.37, body, { noShadow: true }).rotation.x = Math.PI / 2;
+  M(geo('Sphere', 0.045, 6, 5), '#e8a0b4', -0.075, 0.27, 0.2, body, { noShadow: true });
+  M(geo('Sphere', 0.045, 6, 5), '#e8a0b4', 0.075, 0.27, 0.2, body, { noShadow: true });
+  M(geo('Sphere', 0.018, 5, 4), '#ff2a2a', -0.04, 0.2, 0.34, body, { noShadow: true });
+  M(geo('Sphere', 0.018, 5, 4), '#ff2a2a', 0.04, 0.2, 0.34, body, { noShadow: true });
+  const tail = M(geo('Cylinder', 0.014, 0.006, 0.42, 6), '#e8a0b4', 0, 0.1, -0.4, body, { noShadow: true });
+  tail.rotation.x = Math.PI / 2;
+  return { g, body, tail };
+}
+
+function updateRats(dt, tm) {
+  const live = new Set();
+  for (const r of snap.rt || []) {
+    live.add(r.id);
+    let o = ratObjs.get(r.id);
+    if (!o) {
+      const m = makeRat();
+      o = { g: m.g, body: m.body, tail: m.tail, x: r.x, y: r.y, ang: r.a, phase: 0 };
+      ratObjs.set(r.id, o);
+      kitchen.add(o.g);
+    }
+    o.tx = r.x; o.ty = r.y; o.ta = r.a; o.st = r.s;
+  }
+  for (const [id, o] of [...ratObjs]) {
+    if (!live.has(id)) { kitchen.remove(o.g); ratObjs.delete(id); continue; }
+    const ox = o.x, oy = o.y, k = Math.min(1, dt * 12);
+    o.x += (o.tx - o.x) * k; o.y += (o.ty - o.y) * k;
+    const moving = dt > 0 && Math.hypot(o.x - ox, o.y - oy) / dt > 0.3;
+    let diff = o.ta - o.ang;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    o.ang += diff * Math.min(1, dt * 14);
+    if (moving) o.phase += dt * 24;
+    o.g.position.set(o.x, moving ? Math.abs(Math.sin(o.phase)) * 0.03 : 0, o.y);
+    o.g.rotation.y = o.ang;
+    o.body.rotation.x = o.st === 1 ? Math.sin(tm * 18) * 0.18 : 0;      // hlodá
+    o.tail.rotation.z = Math.sin(tm * 9 + o.x) * 0.5;
+  }
+}
+
+/* ---------- sprej z hasicáku (u kamery) ---------- */
+const sprayG = new THREE.Group();
+sprayG.position.set(0.3, -0.35, -0.7);
+sprayG.visible = false;
+camera.add(sprayG);
+const sprayDots = [];
+for (let i = 0; i < 14; i++) {
+  const d = new THREE.Mesh(geo('Sphere', 0.05, 6, 5), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 }));
+  d.userData.i = i;
+  sprayG.add(d);
+  sprayDots.push(d);
+}
+function updateSpray(tm) {
+  const a = actors.get(myId);
+  const ext = a && a.h && a.h.t === 'x' && a.h.c > 0;
+  let on = false;
+  if (ext && holdNow() && me && snap && snap.fi) {
+    const [tx, ty] = targetTile(me);
+    on = snap.fi.some((f) => f.x === tx && f.y === ty);
+  }
+  sprayG.visible = on;
+  if (!on) return;
+  sprayDots.forEach((d) => {
+    const ph = (tm * 2.4 + d.userData.i / sprayDots.length) % 1;
+    d.position.set((Math.random() - 0.5) * 0.05 * ph, (Math.random() - 0.5) * 0.05 * ph + 0.1 * ph, -ph * 1.4);
+    d.scale.setScalar(0.6 + ph * 2.2);
+    d.material.opacity = 0.75 * (1 - ph);
+  });
 }
 
 /* ---------- kuchaři ---------- */
@@ -1099,20 +1366,25 @@ function updateHud() {
   // objednávky
   const live = new Set();
   snap.o.forEach((o) => {
-    const rec = recipes[o.r];
-    if (!rec) return;
+    const rec = o.r ? recipes[o.r] : null;
+    if (o.r && !rec) return;
     live.add(o.id);
     let e = orderEls.get(o.id);
     if (!e) {
       const el = document.createElement('div');
-      el.className = 'order';
-      el.innerHTML = '<b></b><div class="oi"></div><div class="ot"><i></i></div>';
-      el.firstChild.textContent = rec.name;
-      el.querySelector('.oi').textContent = rec.items.map((k) => ICONS[k]).join(' ');
+      el.className = 'order' + (o.v ? ' vip' : '');
+      el.innerHTML = '<b></b><div class="oi"><span class="of"></span><span class="od"></span></div><div class="ot"><i></i></div>';
+      let title = rec ? rec.name + (o.dr ? ' + ' + NAMES[o.dr] : '') : NAMES[o.dr];
+      if (o.v) title = '⭐ ' + title;
+      el.firstChild.textContent = title;
+      el.querySelector('.of').textContent = rec ? rec.items.map((k) => ICONS[k]).join(' ') : '';
+      el.querySelector('.od').textContent = o.dr ? ICONS[o.dr] : '';
       ordersEl.appendChild(el);
-      e = { el, fill: el.querySelector('i') };
+      e = { el, fill: el.querySelector('i'), of: el.querySelector('.of'), od: el.querySelector('.od') };
       orderEls.set(o.id, e);
     }
+    e.of.classList.toggle('done', !!o.fd);
+    e.od.classList.toggle('done', !!o.dd);
     const frac = Math.max(0, o.t / o.l);
     e.fill.style.width = Math.max(3, frac * 100) + '%';
     e.fill.style.background = frac > 0.5 ? '#66bb6a' : frac > 0.25 ? '#ffca28' : '#ef5350';
@@ -1120,6 +1392,37 @@ function updateHud() {
   });
   for (const [id, e] of [...orderEls]) if (!live.has(id)) { e.el.remove(); orderEls.delete(id); }
   ordersEl.classList.toggle('empty', snap.o.length === 0);
+
+  // cíl dne
+  const gEl = $('goal');
+  if (snap.g) {
+    const g = snap.g;
+    const failed = g.k === 'noexp' && g.v > g.n;
+    const done = g.k !== 'noexp' && g.v >= g.n;
+    const prog = g.k === 'noexp' ? 'propadlo ' + g.v + ' / ' + g.n : g.k === 'earn' ? g.v + ' / ' + g.n + ' Kč' : g.v + ' / ' + g.n;
+    const txt = '🎯 ' + g.t + ' – ' + prog + '  (+' + g.r + ' Kč)';
+    if (gEl.textContent !== txt) gEl.textContent = txt;
+    gEl.classList.remove('hidden');
+    gEl.classList.toggle('done', done);
+    gEl.classList.toggle('failed', failed);
+  } else gEl.classList.add('hidden');
+
+  // událost (chaos)
+  const bn = $('banner');
+  if (snap.ch && snap.ch.t > 0) {
+    const txt = '⚡ ' + snap.ch.n + (snap.ch.d > 5 ? '  (' + Math.ceil(snap.ch.t) + ' s)' : '');
+    if (bn.textContent !== txt) bn.textContent = txt;
+    bn.classList.add('show');
+  } else bn.classList.remove('show');
+
+  // hasicák v ruce
+  const mine = actors.get(myId);
+  const ex = $('extInfo');
+  if (mine && mine.h && mine.h.t === 'x') {
+    const t = '🧯 ' + Math.round(mine.h.c * 100) + ' %  ·  míř na oheň a drž E / myš';
+    if (ex.textContent !== t) ex.textContent = t;
+    ex.classList.remove('hidden');
+  } else ex.classList.add('hidden');
 }
 
 /* ---------- plovoucí texty ---------- */
@@ -1153,7 +1456,7 @@ function updateOverlays() {
     let frac = -1, color = '#4fc3f7', txt = '';
     if (d) {
       if (b.ch === 'K' && d.i && d.p > 0) frac = d.p;
-      else if (b.ch === 'W' && d.p > 0) frac = d.p;
+      else if ((b.ch === 'W' || b.ch === 'T') && d.p > 0) frac = d.p;
       else if (b.ch === 'F' && d.i) {
         const st = d.i.s;
         if (st === 'chopped') { frac = d.p; color = '#66bb6a'; }
@@ -1163,7 +1466,7 @@ function updateOverlays() {
           frac = 1 - d.b;
           color = blink ? '#ff1744' : (warn ? '#ff7043' : '#ffb300');
           if (warn) txt = '🔥';
-        } else { frac = 1; color = '#5d1111'; txt = 'SPÁLENO!'; }
+        } else { frac = d.f > 0 ? d.f : 0.05; color = '#e53935'; txt = '🔥 POZOR!'; }
       }
     }
     if (frac < 0) { b.el.classList.add('hidden'); continue; }
@@ -1224,7 +1527,7 @@ function update(dt) {
   const walking = Math.hypot(v.dx, v.dy) > 0.01;
   if (me) {
     me.fx = v.fx; me.fy = v.fy;
-    if (playing && walking) moveBy(me, v.dx * SPEED * dt, v.dy * SPEED * dt);
+    if (playing && walking) moveBy(me, v.dx * SPEED * speedMult * dt, v.dy * SPEED * speedMult * dt);
   }
   for (const a of actors.values()) {
     if (a.id === myId && me) {
@@ -1248,6 +1551,14 @@ function updateCamera(tm) {
   camera.rotation.set(pitch, yaw + Math.PI, 0);
 }
 
+function updateLights(dt) {
+  const target = snap && snap.ch && snap.ch.id === 'dark' && snap.ch.t > 0 ? 1 : 0;
+  dark += (target - dark) * Math.min(1, dt * 4);
+  hemi.intensity = 1.0 * (1 - 0.82 * dark);
+  sun.intensity = 0.75 * (1 - 0.92 * dark);
+  torch.intensity = 1.3 * dark;
+}
+
 function updateHighlight() {
   if (!me || view !== 'game') { hilite.visible = false; return; }
   const [tx, ty] = targetTile(me);
@@ -1267,6 +1578,10 @@ function frame(now) {
   updateCamera(now / 1000);
   syncChefs(dt);
   updateStations(now / 1000);
+  updateFires(now / 1000);
+  updateRats(dt, now / 1000);
+  updateSpray(now / 1000);
+  updateLights(dt);
   updateHighlight();
   renderer.render(scene, camera);
   updateOverlays();

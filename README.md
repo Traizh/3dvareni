@@ -41,3 +41,10 @@ WASD / ↑↓ – chůze a úkrok, myš (klikni do hry) nebo ←→ – rozhlí�
 - **Klasika** – jedno kolo 180 s, týmové skóre a hvězdy.
 - **Dny** – každý den 120 s. Suroviny z beden ubývají ze skladu, peníze získáváš z odevzdaných objednávek. Mezi dny se v obchodě objednávají zásoby a platí se nájem (25 Kč a každý den o 10 víc). Hra končí, když nezaplatíš nájem nebo ti nezbydou zásoby ani peníze na nákup.
 - **Hrát sám** – tlačítko v menu spustí zvolený režim hned a bez dalších hráčů.
+
+## Pití, oheň, krysy a chaos
+- **Pití:** kelímek ze stohu → podrž ho u kohoutku (cola / limonáda / džus) → odnes na výdej. Objednávky mohou být jen pití, nebo menu (jídlo + pití; za kompletní menu je bonus). V režimu Dny pití spotřebovává sirup ze skladu.
+- **Oheň:** připálené maso se po 4 s vznítí, oheň se šíří na sousední pulty, ničí věci a zákazníci kvůli kouři rychleji odcházejí. Hasicák je v držáku vlevo (dá se vrátit a naplní se). Míř na plameny a podrž E / levé tlačítko myši.
+- **Krysy:** přibíhají z kouta, hlodají jídlo na pultech, talíře a (ve Dnech) zásoby. Plaší je přiblížení, dají se plácnout (E) za bonus.
+- **Náhodné události:** rush hodina, přehřáté sporáky, výpadek proudu, krysí invaze, jiskra (požár), žízeň.
+- **Dny navíc:** denní modifikátor (rušný den, VIP hosté, žíznivý den, krysí den, vedro), denní cíl s bonusem, kolísající ceny surovin a trvalá vylepšení (nůž, boty, pánev, talíře, pasti, hasicák, nápis).

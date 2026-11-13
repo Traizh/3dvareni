@@ -40,6 +40,10 @@
       Interakce s tím, na co se díváš: <kbd>E</kbd>, <kbd>mezerník</kbd> nebo levé tlačítko myši – zvednout / položit.<br>
       Krájení a mytí: u prkénka / dřezu <b>podrž</b> nebo <b>mačkej</b> interakci.<br>
       Maso: nakrájej → opeč na sporáku → pozor, ať se nespálí!<br>
+      Pití: vezmi <b>kelímek</b> → podrž ho u <b>kohoutku</b> → odnes na výdej. Některé objednávky chtějí jídlo i pití.<br>
+      <b>Oheň:</b> připálené maso se vznítí a oheň se šíří! Vezmi <b>hasicák</b> (držák vlevo), míř na plameny a podrž <kbd>E</kbd>.<br>
+      <b>Krysy:</b> hlodají jídlo a zásoby. Přiblíž se, aby utekly, nebo je plácni (<kbd>E</kbd>).<br>
+      Občas přijde <b>náhodná událost</b> – rush, výpadek proudu, jiskra…<br>
       Režim <b>Dny</b>: každá surovina z bedny ubývá ze skladu. Mezi dny objednáváš nové zásoby za peníze z objednávek a platíš nájem.
     </div>
   </main>
@@ -77,6 +81,9 @@
       </div>
       <div id="orders" class="empty"></div>
       <div id="world"></div>
+      <div id="goal" class="hidden"></div>
+      <div id="banner"></div>
+      <div id="extInfo" class="hidden"></div>
       <div id="cross"></div>
       <div id="lockHint" class="hidden">🖱 Klikni do hry pro ovládání myší (Esc = uvolnit)</div>
       <div id="countdown" class="hidden"><b>3</b><span>Připrav se, kuchaři!</span></div>
@@ -111,7 +118,11 @@
       <p id="shopSummary" class="hint"></p>
       <div class="moneyline">💰 <b id="shopMoney">0</b> Kč</div>
       <p id="shopRent" class="hint"></p>
+      <div id="shopNext"></div>
+      <h2 class="shophead">🛒 Suroviny a pití <small>(ceny se každý den mění)</small></h2>
       <div id="shopItems"></div>
+      <h2 class="shophead">🔧 Vylepšení <small>(platí do konce hry)</small></h2>
+      <div id="shopUp"></div>
       <p id="shopReady" class="hint"></p>
       <div class="row"><button id="readyBtn" class="btn primary">Připraven</button></div>
       <button id="shopLeave" class="btn small">Odejít</button>

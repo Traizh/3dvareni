@@ -315,3 +315,56 @@ canvas#game { cursor: crosshair; }
 .shoprow .sprice.dear { color: #ff9a90; }
 .shoprow.upg .sname small { display: block; font-weight: 400; font-size: .75rem; color: #d9b98a; }
 .shoprow.upg .btn.small { min-width: 78px; }
+
+/* ---------- Postava (avatar) ---------- */
+.avwrap { position: relative; display: inline-block; flex: 0 0 auto; vertical-align: middle; }
+.av { position: absolute; left: 0; top: 0; width: 44px; height: 48px; transform-origin: top left; }
+.av i { position: absolute; display: block; }
+.av .av-body { left: 7px; bottom: 0; width: 30px; height: 21px; border-radius: 13px 13px 3px 3px; background: var(--shirt); box-shadow: inset 0 -3px 0 rgba(0,0,0,.12); }
+.av .av-head { left: 11px; top: 13px; width: 22px; height: 22px; border-radius: 50%; background: var(--skin); }
+.av .av-eyes { left: 16px; top: 22px; width: 12px; height: 3px; background:
+  radial-gradient(circle at 1.5px 1.5px, #2b1b10 1.5px, transparent 1.7px) 0 0 / 12px 3px no-repeat,
+  radial-gradient(circle at 10.5px 1.5px, #2b1b10 1.5px, transparent 1.7px) 0 0 / 12px 3px no-repeat; }
+.av.hs0 .av-hat { left: 9px; top: 0; width: 26px; height: 20px; border-radius: 13px 13px 4px 4px; background: var(--hat); box-shadow: inset 0 -4px 0 rgba(0,0,0,.15); }
+.av.hs1 .av-hat { left: 10px; top: 10px; width: 24px; height: 9px; border-radius: 6px; background: var(--hat); }
+.av.hs2 .av-hat { left: 9px; top: 7px; width: 26px; height: 12px; border-radius: 13px 13px 2px 2px; background: var(--hat); box-shadow: 8px 6px 0 -2px var(--hat); }
+
+/* ---------- Úprava postavy v menu ---------- */
+.look { display: flex; gap: 14px; align-items: center; margin: 10px 0 4px; padding: 10px 12px; background: rgba(0,0,0,.25); border-radius: 14px; text-align: left; }
+.lookprev { width: 100px; height: 108px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.07); border-radius: 12px; flex: 0 0 auto; }
+.lookrows { flex: 1; min-width: 0; }
+.lookrow { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.lookrow > span { width: 62px; font-size: .75rem; color: #d9b98a; flex: 0 0 auto; }
+.sw { display: flex; flex-wrap: wrap; gap: 4px; }
+.swb { width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); cursor: pointer; padding: 0; }
+.swb.txt { width: auto; height: auto; padding: 2px 8px; border-radius: 10px; font: inherit; font-size: .72rem; background: #3a2616; color: #fff4dc; }
+.swb.active { border-color: #ffd27a; box-shadow: 0 0 0 2px rgba(255,210,122,.5); }
+.swb.txt.active { background: #e5731a; color: #2b1305; }
+.lookrows .btn.small { margin-top: 2px; }
+#menu { max-height: 96vh; overflow-y: auto; }
+
+/* ---------- Restaurace ---------- */
+.restsel { margin-top: 6px; }
+.mode.locked { opacity: .45; }
+.lobbyrests { margin-top: 4px; }
+.restcard { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 8px 10px; background: rgba(0,0,0,.28); border-radius: 12px; text-align: left; border: 2px solid transparent; }
+.restcard.sel { border-color: #ffc16b; background: rgba(255,157,46,.14); }
+.restcard.locked { opacity: .9; }
+.restcard .rtx { flex: 1; min-width: 0; }
+.restcard .rtx b { display: block; }
+.restcard .rtx small { display: block; font-size: .72rem; color: #d9b98a; }
+.restcard .btn.small { margin-top: 0; min-width: 110px; }
+
+/* ---------- MVP ---------- */
+.mvp { margin: 10px 0 2px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(rgba(255,210,122,.2), rgba(255,157,46,.1)); border: 2px solid rgba(255,210,122,.5); text-align: left; }
+.mvptop { display: flex; align-items: center; gap: 12px; }
+.mvptop .crown { font-size: 2rem; }
+.mvpinfo b { display: block; font-size: 1.15rem; color: #ffd27a; }
+.mvpinfo span { display: block; font-weight: 700; }
+.mvpinfo small { display: block; font-size: .78rem; color: #e6d2b0; }
+.board { list-style: none; margin: 10px 0 0; padding: 0; }
+.board li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.12); }
+.board .bn { font-weight: 700; flex: 0 0 auto; }
+.board .bp { color: #ffd27a; font-weight: 700; flex: 0 0 auto; }
+.board small { flex: 1; text-align: right; font-size: .72rem; color: #d9b98a; }
+.players .avwrap { margin-right: 6px; }

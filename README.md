@@ -51,3 +51,8 @@ WASD / ↑↓ – chůze a úkrok, myš (klikni do hry) nebo ←→ – rozhlí�
 
 ## Restaurace za výdejním oknem
 Za výdejním pultem je celá jídelna: stoly, židle, okna, vchod a hosté. S každou objednávkou přijde host, sedne si ke stolu a nad hlavou má bublinu s objednávkou (a trpělivostí). Když odevzdáš jídlo nebo pití, objeví se na druhém pultu (za oknem, pod ohřívací lampou) a číšník ho odnese hostovi. Host se naje a odejde, při propadlé objednávce odchází naštvaně. Jde jen o vizuální vrstvu – hra se řídí stejnými událostmi ze serveru.
+
+## Postava, restaurace a MVP
+- **Vzhled postavy:** v menu si vybereš barvu a styl čepice (kuchařská čepice, šátek, kšiltovka), barvu pleti a oblečení. Ukládá se do prohlížeče a ostatní hráči tě vidí tak, jak sis ho nastavil.
+- **Restaurace:** Burger bar, Sushi bar (rýžovar, maki a nigiri) a Pizzerie (pec, těsto → omáčka → sýr → feferonky/houby). V režimu Klasika si restauraci volí hostitel v lobby zdarma. Ve Dnech začínáš s burgerem a další restaurace kupuješ v obchodě mezi dny (Sushi 250 Kč, Pizzerie 180 Kč), kdykoli pak můžeš pro další den přepnout. Každá restaurace má vlastní suroviny, recepty, sporák a vzhled kuchyně i jídelny.
+- **MVP:** na konci hry (a po každém dni ve Dnech) se vyhodnotí nejlepší hráč podle odevzdaných jídel a pití, krájení, vaření, mytí, plácnutých krys a uhašených požárů. Najdeš tam i žebříček všech hráčů.

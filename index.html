@@ -21,8 +21,24 @@
     </div>
     <p id="modeInfo" class="hint small"></p>
 
+    <div class="restsel">
+      <div class="modes" id="menuRests"></div>
+      <p id="restInfo" class="hint small"></p>
+    </div>
+
     <label for="nameInput">Přezdívka</label>
     <input id="nameInput" type="text" maxlength="12" placeholder="např. Šéfkuchař" autocomplete="off">
+
+    <div class="look">
+      <div class="lookprev" id="lookPrev"></div>
+      <div class="lookrows">
+        <div class="lookrow"><span>Čepice</span><div id="lkHat" class="sw"></div></div>
+        <div class="lookrow"><span>Styl</span><div id="lkStyle" class="sw"></div></div>
+        <div class="lookrow"><span>Pleť</span><div id="lkSkin" class="sw"></div></div>
+        <div class="lookrow"><span>Oblečení</span><div id="lkShirt" class="sw"></div></div>
+        <button id="lookRandom" type="button" class="btn small">🎲 Náhodně</button>
+      </div>
+    </div>
 
     <label for="codeInput">Kód místnosti</label>
     <input id="codeInput" type="text" maxlength="6" placeholder="např. ABCD" autocomplete="off">
@@ -60,6 +76,7 @@
       <button id="lobbyDays" class="mode"><b>Dny</b><span>zásoby · peníze · nájem</span></button>
     </div>
     <p id="lobbyModeInfo" class="hint small"></p>
+    <div class="modes lobbyrests" id="lobbyRests"></div>
 
     <ul id="playerList" class="players"></ul>
     <p id="lobbyHint" class="hint"></p>
@@ -103,6 +120,7 @@
       <div id="endLabel" class="sub">Týmové skóre</div>
       <div id="endScore" class="bigscore">0</div>
       <p id="endStats" class="hint"></p>
+      <div id="mvpBox" class="mvp hidden"></div>
       <div class="row">
         <button id="againBtn" class="btn primary">Nová hra</button>
         <button id="toLobbyBtn" class="btn">Zpět do lobby</button>
@@ -119,6 +137,8 @@
       <div class="moneyline">💰 <b id="shopMoney">0</b> Kč</div>
       <p id="shopRent" class="hint"></p>
       <div id="shopNext"></div>
+      <h2 class="shophead">🏪 Restaurace <small>(kup další a zvol, kterou otevřeš)</small></h2>
+      <div id="shopRests"></div>
       <h2 class="shophead">🛒 Suroviny a pití <small>(ceny se každý den mění)</small></h2>
       <div id="shopItems"></div>
       <h2 class="shophead">🔧 Vylepšení <small>(platí do konce hry)</small></h2>

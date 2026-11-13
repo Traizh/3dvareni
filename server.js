@@ -868,7 +868,7 @@ function interact(room, p) {
         let pts = payout(room, o, 8 + Math.round(6 * Math.max(0, o.t / o.l)), true);
         o.dd = true; room.stat.drinks++; p.held = null;
         pts += completeOrder(room, o);
-        return ev(room, 'serve', fx, fy, { v: pts });
+        return ev(room, 'serve', fx, fy, { v: pts, o: o.id, part: 'drink', d: held.d });
       }
       if (!isPlate(held) || !held.c.length) return ev(room, 'no', fx, fy, { m: 'Potřebuješ talíř s jídlem nebo pití' });
       const idx = findOrder(room, held.c);
@@ -879,7 +879,7 @@ function interact(room, p) {
       p.held = null;
       room.returns.push(DIRTY_DELAY); // špinavý talíř se vrátí k dřezu
       pts += completeOrder(room, o);
-      return ev(room, 'serve', fx, fy, { v: pts });
+      return ev(room, 'serve', fx, fy, { v: pts, o: o.id, part: 'food', c: held.c.slice() });
     }
     default:
       return undefined;
@@ -987,7 +987,7 @@ function updateOrders(room, dt) {
       room.expired++;
       if (room.mode === 'days') room.money = Math.max(0, room.money - EXPIRE_PENALTY);
       else room.score = Math.max(0, room.score - EXPIRE_PENALTY);
-      ev(room, 'expire', 0, 0);
+      ev(room, 'expire', 0, 0, { o: o.id });
     }
   }
 }

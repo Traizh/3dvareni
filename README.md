@@ -48,3 +48,6 @@ WASD / ↑↓ – chůze a úkrok, myš (klikni do hry) nebo ←→ – rozhlí�
 - **Krysy:** přibíhají z kouta, hlodají jídlo na pultech, talíře a (ve Dnech) zásoby. Plaší je přiblížení, dají se plácnout (E) za bonus.
 - **Náhodné události:** rush hodina, přehřáté sporáky, výpadek proudu, krysí invaze, jiskra (požár), žízeň.
 - **Dny navíc:** denní modifikátor (rušný den, VIP hosté, žíznivý den, krysí den, vedro), denní cíl s bonusem, kolísající ceny surovin a trvalá vylepšení (nůž, boty, pánev, talíře, pasti, hasicák, nápis).
+
+## Restaurace za výdejním oknem
+Za výdejním pultem je celá jídelna: stoly, židle, okna, vchod a hosté. S každou objednávkou přijde host, sedne si ke stolu a nad hlavou má bublinu s objednávkou (a trpělivostí). Když odevzdáš jídlo nebo pití, objeví se na druhém pultu (za oknem, pod ohřívací lampou) a číšník ho odnese hostovi. Host se naje a odejde, při propadlé objednávce odchází naštvaně. Jde jen o vizuální vrstvu – hra se řídí stejnými událostmi ze serveru.

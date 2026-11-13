@@ -608,6 +608,7 @@ socket.on('state', (s) => {
   for (const id of [...actors.keys()]) if (!seen.has(id)) removeActor(id);
 
   handleEvents(s.ev || []);
+  if (kitchen) syncCustomers(s.o || []);
   if (s.cd > 0) {
     const c = Math.ceil(s.cd);
     if (c !== lastCd) { lastCd = c; Sound.play('count'); }
@@ -631,9 +632,9 @@ function reconcile(p) {
 function handleEvents(list) {
   for (const e of list) {
     switch (e.e) {
-      case 'serve': Sound.play('serve'); float(e.x, 1.5, e.y, '+' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
+      case 'serve': if (e.o) restaurantServe(e); Sound.play('serve'); float(e.x, 1.5, e.y, '+' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
       case 'no': Sound.play('no'); if (e.m) float(e.x, 1.5, e.y, e.m, '#ff9a90'); break;
-      case 'expire': Sound.play('expire'); floatFixed('Objednávka propadla!  −5' + (gameMode === 'days' ? ' Kč' : ''), '#ff9a90'); break;
+      case 'expire': if (e.o) restaurantAngry(e.o); Sound.play('expire'); floatFixed('Objednávka propadla!  −5' + (gameMode === 'days' ? ' Kč' : ''), '#ff9a90'); break;
       case 'go': {
         Sound.play('go');
         const g = $('goText');
@@ -660,8 +661,8 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x120a06, 22, 44);
-const camera = new THREE.PerspectiveCamera(72, 16 / 9, 0.05, 80);
+scene.fog = new THREE.Fog(0x120a06, 50, 95);
+const camera = new THREE.PerspectiveCamera(72, 16 / 9, 0.05, 140);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
 const EYE = 1.6;
@@ -678,11 +679,11 @@ const torch = new THREE.PointLight(0xfff0cc, 0, 10);      // baterka při výpad
 camera.add(torch);
 let dark = 0;
 const sun = new THREE.DirectionalLight(0xffffff, 0.75);
-sun.position.set(4, 14, 9);
-sun.target.position.set(8, 0, 5);
+sun.position.set(14, 16, 9);
+sun.target.position.set(17, 0, 5);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-Object.assign(sun.shadow.camera, { left: -11, right: 11, top: 9, bottom: -9, near: 1, far: 40 });
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -21, right: 21, top: 10, bottom: -10, near: 1, far: 50 });
 sun.shadow.bias = -0.0006;
 scene.add(sun, sun.target);
 
@@ -887,7 +888,6 @@ function buildKitchen() {
   M(geo('Box', 17, WH, 0.5), '#8c8aa6', 8, WH / 2, -0.25, kitchen);          // zadní zeď
   M(geo('Box', 17, WH, 0.5), '#8c8aa6', 8, WH / 2, 10.25, kitchen);          // přední zeď
   M(geo('Box', 0.5, WH, 11), '#8c8aa6', -0.25, WH / 2, 5, kitchen);          // levá zeď
-  M(geo('Box', 0.5, WH, 11), '#8c8aa6', 16.25, WH / 2, 5, kitchen);          // pravá zeď
   M(geo('Box', 17, 0.3, 0.55), '#46455a', 8, 0.15, -0.0, kitchen, { noShadow: true });
   const ceil = M(geo('Plane', 17, 11), '#e9dfc8', 8, WH, 5, kitchen, { noShadow: true });
   ceil.rotation.x = Math.PI / 2;
@@ -1037,6 +1037,8 @@ function buildKitchen() {
     d.sig = null;
     kitchen.add(d.g);
   }
+
+  buildDining();
 
   // zvýraznění políčka, na které hráč míří
   hilite = new THREE.Group();
@@ -1268,6 +1270,508 @@ function updateSpray(tm) {
     d.position.set((Math.random() - 0.5) * 0.05 * ph, (Math.random() - 0.5) * 0.05 * ph + 0.1 * ph, -ph * 1.4);
     d.scale.setScalar(0.6 + ph * 2.2);
     d.material.opacity = 0.75 * (1 - ph);
+  });
+}
+
+/* =====================================================================
+ *  Restaurace za výdejním oknem: jídelna, hosté u stolů a číšníci.
+ *  Hosté se objeví s každou objednávkou, jídlo z výdeje se objeví na druhém
+ *  pultu a číšník ho odnese k jejich stolu. Je to jen vizuální vrstva –
+ *  řídí se událostmi a snapshotem ze serveru.
+ * ===================================================================== */
+const DWH = 2.8;                                         // výška stěn jídelny
+const TABLE_X = [21.5, 26, 30.5], TABLE_Z = [2.2, 7.8];  // středy stolů
+const AISLE_Z = 5.0;                                     // hlavní ulička
+const DOOR = { x: 34.2, z: 5.0 };                        // vchod pro hosty
+const SLOT_X = 16.95;                                    // vystavené jídlo na druhém pultu
+const SLOT_Z = [3.4, 4.0, 4.6, 5.2, 5.8, 6.4];
+const WAITER_HOME = [[18.7, 3.7], [18.7, 6.3]];
+const SKINS = ['#f5cfa0', '#e0ac80', '#c68642', '#8d5524'];
+const SHIRTS = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#a1887f', '#fff176'];
+const HAIRS = ['#2b1b10', '#5a3b1e', '#c9a227', '#161616', '#8b2c1b', '#d9d9d9'];
+
+let dining = null;                // skupina s dynamickými věcmi (hosté, číšníci, jídlo)
+let seats = [];
+let customers = new Map();        // id objednávky -> host
+let waiters = [];
+let jobs = [];                    // fronta rozvozu
+let slots = [];                   // obsazení míst na výdejním pultu
+let ambients = [];
+let restClock = 0;               // herní čas jídelny (s)
+const rnd = (a) => a[Math.floor(Math.random() * a.length)];
+
+/* ---------- postavy ---------- */
+function makePerson(o) {
+  const g = new THREE.Group();
+  const body = new THREE.Group();
+  const legs = new THREE.Group();
+  g.add(body, legs);
+  M(geo('Cylinder', 0.2, 0.24, 0.5, 12), o.shirt, 0, 0.45, 0, body);
+  M(geo('Sphere', 0.17, 14, 10), o.skin, 0, 0.86, 0, body);
+  const hair = M(geo('Sphere', 0.18, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), o.hair, 0, 0.88, -0.015, body);
+  hair.rotation.x = -0.2;
+  M(geo('Sphere', 0.022, 6, 4), '#222222', -0.06, 0.89, 0.15, body, { noShadow: true });
+  M(geo('Sphere', 0.022, 6, 4), '#222222', 0.06, 0.89, 0.15, body, { noShadow: true });
+  if (o.apron) {
+    M(geo('Box', 0.36, 0.34, 0.04), '#1d1d1d', 0, 0.4, 0.22, body);
+    M(geo('Box', 0.12, 0.05, 0.04), '#b71c1c', 0, 0.68, 0.2, body, { noShadow: true });
+  }
+  const mkArm = (x) => {
+    const a = new THREE.Group();
+    a.position.set(x, 0.66, 0);
+    M(geo('Box', 0.08, 0.4, 0.08), o.apron ? '#ffffff' : o.shirt, 0, -0.18, 0, a);
+    M(geo('Sphere', 0.05, 6, 5), o.skin, 0, -0.4, 0, a, { noShadow: true });
+    body.add(a);
+    return a;
+  };
+  const armL = mkArm(-0.27), armR = mkArm(0.27);
+  const holder = new THREE.Group();
+  holder.position.set(0, 0.7, 0.44);
+  body.add(holder);
+  const p = { g, body, legs, armL, armR, holder, seated: false, o };
+  setSeated(p, false);
+  return p;
+}
+function setSeated(p, seated) {
+  p.seated = seated;
+  clearGroup(p.legs);
+  const pants = p.o.pants || '#33405a';
+  if (seated) {
+    p.body.position.y = 0.32;
+    [-0.1, 0.1].forEach((x) => {
+      M(geo('Box', 0.1, 0.1, 0.4), pants, x, 0.56, 0.22, p.legs);
+      M(geo('Box', 0.1, 0.5, 0.1), pants, x, 0.27, 0.4, p.legs);
+    });
+    p.armL.rotation.x = -1.0; p.armR.rotation.x = -1.0;
+  } else {
+    p.body.position.y = 0;
+    [-0.1, 0.1].forEach((x) => M(geo('Cylinder', 0.08, 0.08, 0.22, 8), pants, x, 0.11, 0, p.legs));
+    p.armL.rotation.x = 0; p.armR.rotation.x = 0;
+  }
+}
+function randomLook() { return { shirt: rnd(SHIRTS), skin: rnd(SKINS), hair: rnd(HAIRS), pants: rnd(['#33405a', '#4a3b2a', '#2d2d2d', '#5a4a6a']) }; }
+
+// jednoduchý pohyb po cestě [[x,z], ...]
+function npcStep(n, dt) {
+  n.moving = false;
+  if (n.path && n.path.length) {
+    const t = n.path[0];
+    const dx = t[0] - n.x, dz = t[1] - n.z, d = Math.hypot(dx, dz), step = n.speed * dt;
+    if (d <= step) {
+      n.x = t[0]; n.z = t[1]; n.path.shift();
+      if (!n.path.length && n.onArrive) { const f = n.onArrive; n.onArrive = null; f(); }
+    } else {
+      n.x += dx / d * step; n.z += dz / d * step;
+      n.tang = Math.atan2(dx, dz);
+      n.moving = true;
+    }
+  } else if (n.look) n.tang = Math.atan2(n.look[0] - n.x, n.look[1] - n.z);
+  let diff = n.tang - n.ang;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  n.ang += diff * Math.min(1, dt * 10);
+  if (n.moving) n.phase += dt * n.speed * 5;
+}
+function npcApply(n) {
+  const pr = n.person;
+  pr.g.position.set(n.x, 0, n.z);
+  pr.g.rotation.y = n.ang;
+}
+function animPerson(n, tm) {
+  const pr = n.person;
+  if (pr.seated) {
+    pr.body.position.y = 0.32;
+    if (n.eating) pr.armR.rotation.x = -1.0 + Math.sin(tm * 6) * 0.45;
+    else pr.armR.rotation.x = -1.0;
+    pr.body.rotation.x = n.angry ? Math.sin(tm * 25) * 0.04 : 0;
+  } else {
+    if (n.carry) { pr.armL.rotation.x = -1.15; pr.armR.rotation.x = -1.15; }
+    else if (n.moving) { pr.armL.rotation.x = Math.sin(n.phase) * 0.7; pr.armR.rotation.x = -Math.sin(n.phase) * 0.7; }
+    else { pr.armL.rotation.x = 0; pr.armR.rotation.x = 0; }
+    pr.body.position.y = n.moving ? Math.abs(Math.sin(n.phase)) * 0.045 : 0;
+  }
+}
+
+/* ---------- bublina s objednávkou ---------- */
+function makeBubble() {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 112;
+  const tex = new THREE.CanvasTexture(cv);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(1.5, 0.66, 1);
+  sp.position.set(0, 2.0, 0);
+  sp.renderOrder = 5;
+  return { cv, tex, sp, sig: '' };
+}
+function drawBubble(c, frac) {
+  const b = c.bubble;
+  const bucket = Math.floor(frac * 12);
+  const sig = [c.state, c.delivered.food, c.delivered.drink, c.served.food, c.served.drink, c.angry, bucket].join('|');
+  if (sig === b.sig) return;
+  b.sig = sig;
+  const x = b.cv.getContext('2d');
+  x.clearRect(0, 0, 256, 112);
+  x.fillStyle = 'rgba(255,255,255,0.96)';
+  x.strokeStyle = c.angry ? '#d32f2f' : '#3a2615';
+  x.lineWidth = 5;
+  x.beginPath();
+  if (x.roundRect) x.roundRect(8, 6, 240, 80, 20); else x.rect(8, 6, 240, 80);
+  x.fill(); x.stroke();
+  x.beginPath(); x.moveTo(110, 86); x.lineTo(128, 108); x.lineTo(146, 86); x.closePath(); x.fill();
+  x.font = '40px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  if (c.angry) {
+    x.fillText('😠', 128, 46);
+  } else if (c.state === 'eat') {
+    x.fillText('😋', 128, 46);
+  } else {
+    const parts = [];
+    if (c.foodIcons) parts.push({ t: c.foodIcons, done: c.served.food || c.delivered.food });
+    if (c.drinkIcon) parts.push({ t: c.drinkIcon, done: c.served.drink || c.delivered.drink });
+    const widths = parts.map((p) => x.measureText(p.t).width);
+    const total = widths.reduce((a, w) => a + w, 0) + (parts.length - 1) * 18;
+    let cx = 128 - total / 2;
+    parts.forEach((p, i) => {
+      x.globalAlpha = p.done ? 0.3 : 1;
+      x.textAlign = 'left';
+      x.fillText(p.t, cx, 44);
+      cx += widths[i] + 18;
+    });
+    x.globalAlpha = 1;
+    // trpělivost
+    x.fillStyle = 'rgba(0,0,0,0.2)'; x.fillRect(34, 66, 188, 9);
+    x.fillStyle = frac > 0.5 ? '#66bb6a' : frac > 0.25 ? '#ffca28' : '#ef5350';
+    x.fillRect(34, 66, 188 * Math.max(0.03, frac), 9);
+  }
+  b.tex.needsUpdate = true;
+}
+
+/* ---------- nábytek ---------- */
+function makeChair(x, z, ang) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = ang;
+  M(geo('Box', 0.52, 0.06, 0.52), '#8a5a2b', 0, 0.47, 0, g);
+  M(geo('Box', 0.52, 0.55, 0.06), '#8a5a2b', 0, 0.78, -0.24, g);
+  [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]].forEach((q) => M(geo('Box', 0.06, 0.45, 0.06), '#5f3d1b', q[0], 0.225, q[1], g));
+  return g;
+}
+function makeTable(x, z, cloth) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  M(geo('Cylinder', 0.66, 0.66, 0.06, 20), cloth, 0, 0.75, 0, g);
+  M(geo('Cylinder', 0.1, 0.1, 0.72, 10), '#5f3d1b', 0, 0.38, 0, g);
+  M(geo('Cylinder', 0.36, 0.4, 0.05, 14), '#5f3d1b', 0, 0.03, 0, g);
+  M(geo('Cylinder', 0.03, 0.03, 0.12, 6), '#ffffff', 0.15, 0.84, 0.1, g, { noShadow: true });       // svíčka
+  M(geo('Sphere', 0.02, 6, 4), '#ffd54f', 0.15, 0.91, 0.1, g, { noShadow: true, mat: { emissive: '#ffb300' } });
+  return g;
+}
+function makePlant(x, z) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  M(geo('Cylinder', 0.28, 0.2, 0.45, 10), '#a1522a', 0, 0.225, 0, g);
+  [[0, 0.8, 0, 0.3], [-0.15, 0.65, 0.1, 0.22], [0.16, 0.7, -0.08, 0.24]].forEach((q) => M(geo('Sphere', q[3], 8, 6), '#3d8f3a', q[0], q[1], q[2], g));
+  return g;
+}
+function makeFloorTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 256;
+  const x = cv.getContext('2d');
+  for (let r = 0; r < 16; r++) {
+    let px = -((r * 37) % 90);
+    while (px < 512) {
+      const w = 70 + ((px * 13 + r * 7) % 60);
+      const v = 150 + ((px * 31 + r * 17) % 40);
+      x.fillStyle = 'rgb(' + v + ',' + (v - 45) + ',' + (v - 85) + ')';
+      x.fillRect(px, r * 16, w - 1, 15);
+      px += w;
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  return tex;
+}
+
+function buildDining() {
+  dining = new THREE.Group();
+  kitchen.add(dining);
+  customers = new Map(); waiters = []; jobs = []; ambients = [];
+  slots = SLOT_Z.map(() => null);
+
+  const K = kitchen;
+  const MIDX = 25.75;
+  // podlaha a koberec
+  const fl = new THREE.Mesh(geo('Plane', 18, 10), new THREE.MeshLambertMaterial({ map: makeFloorTexture() }));
+  fl.rotation.x = -Math.PI / 2; fl.position.set(25.5, 0.002, 5); fl.receiveShadow = true;
+  K.add(fl);
+  M(geo('Box', 17.2, 0.02, 1.7), '#8e2f3a', 25.6, 0.012, AISLE_Z, K, { noShadow: true });
+  M(geo('Box', 17.2, 0.022, 1.3), '#b8434f', 25.6, 0.013, AISLE_Z, K, { noShadow: true });
+
+  // stěny (zadní a přední s okny, pravá se vchodem)
+  M(geo('Box', 18.6, DWH, 0.5), '#ead8b8', MIDX, DWH / 2, -0.25, K);
+  M(geo('Box', 18.6, DWH, 0.5), '#ead8b8', MIDX, DWH / 2, 10.25, K);
+  M(geo('Box', 0.5, DWH, 4.5), '#ead8b8', 34.75, DWH / 2, 1.75, K);
+  M(geo('Box', 0.5, DWH, 4.5), '#ead8b8', 34.75, DWH / 2, 8.25, K);
+  M(geo('Box', 0.5, 0.7, 2.0), '#ead8b8', 34.75, DWH - 0.35, 5.0, K);
+  M(geo('Box', 18.6, 0.9, 0.06), '#6b4a2f', MIDX, 0.45, 0.03, K, { noShadow: true });        // dřevěný lem
+  M(geo('Box', 18.6, 0.9, 0.06), '#6b4a2f', MIDX, 0.45, 9.97, K, { noShadow: true });
+  // vchod
+  M(geo('Box', 0.12, 2.1, 0.12), '#4a2f18', 34.45, 1.05, 3.94, K);
+  M(geo('Box', 0.12, 2.1, 0.12), '#4a2f18', 34.45, 1.05, 6.06, K);
+  M(geo('Box', 0.12, 0.12, 2.24), '#4a2f18', 34.45, 2.1, 5.0, K);
+  M(geo('Box', 0.05, 1.95, 0.95), '#9ad4f5', 34.42, 1.0, 4.45, K, { noShadow: true, mat: { transparent: true, opacity: 0.45 } });
+  M(geo('Box', 0.05, 1.95, 0.95), '#9ad4f5', 34.42, 1.0, 5.55, K, { noShadow: true, mat: { transparent: true, opacity: 0.45 } });
+  M(geo('Box', 0.05, 2.4, 3.2), '#cfeaff', 36.3, 1.2, 5.0, K, { noShadow: true, mat: { emissive: '#8fc6f0' } });   // světlo z ulice
+  const wel = labelSprite('VÍTEJTE', '#ffe9b0', 1.3);
+  wel.position.set(34.2, 2.45, 5.0);
+  K.add(wel);
+  // okna
+  [19.8, 24, 28.2, 32.4].forEach((x) => {
+    [[0.04, 1], [9.96, -1]].forEach(([z, s]) => {
+      M(geo('Box', 2.1, 1.35, 0.05), '#bfe4ff', x, 1.65, z, K, { noShadow: true, mat: { emissive: '#6fa8d6' } });
+      M(geo('Box', 2.3, 0.08, 0.1), '#5a3b1e', x, 2.36, z - s * 0.02, K, { noShadow: true });
+      M(geo('Box', 2.3, 0.08, 0.1), '#5a3b1e', x, 0.95, z - s * 0.02, K, { noShadow: true });
+      M(geo('Box', 0.08, 1.4, 0.1), '#5a3b1e', x - 1.1, 1.65, z - s * 0.02, K, { noShadow: true });
+      M(geo('Box', 0.08, 1.4, 0.1), '#5a3b1e', x + 1.1, 1.65, z - s * 0.02, K, { noShadow: true });
+      M(geo('Box', 0.05, 1.35, 0.1), '#5a3b1e', x, 1.65, z - s * 0.02, K, { noShadow: true });
+      M(geo('Box', 0.35, 1.4, 0.08), '#a83232', x - 1.35, 1.6, z - s * 0.05, K, { noShadow: true });     // závěsy
+      M(geo('Box', 0.35, 1.4, 0.08), '#a83232', x + 1.35, 1.6, z - s * 0.05, K, { noShadow: true });
+    });
+  });
+  const menu = labelSprite('JÍDELNÍČEK', '#fff3d0', 1.6);
+  menu.position.set(18.2, 2.3, 0.2);
+  K.add(menu);
+  const ceil = M(geo('Plane', 18.6, 11), '#efe4cc', MIDX, DWH, 5, K, { noShadow: true });
+  ceil.rotation.x = Math.PI / 2;
+
+  // okénko mezi kuchyní a jídelnou: stěna kuchyně s otvorem nad pultem
+  M(geo('Box', 0.5, DWH, 3.5), '#8c8aa6', 16.25, DWH / 2, 1.25, K);
+  M(geo('Box', 0.5, DWH, 3.5), '#8c8aa6', 16.25, DWH / 2, 8.75, K);
+  M(geo('Box', 0.5, 0.8, 4.0), '#8c8aa6', 16.25, DWH - 0.4, 5.0, K);
+  M(geo('Box', 0.52, TOP - 0.08, 4.0), '#7d4f25', 16.25, (TOP - 0.08) / 2, 5.0, K);
+  M(geo('Box', 0.52, 0.08, 4.04), '#3a9b78', 16.25, TOP - 0.04, 5.0, K);
+  // druhý pult – vystavené jídlo
+  M(geo('Box', 0.95, TOP - 0.08, 4.0), '#7d4f25', 16.975, (TOP - 0.08) / 2, 5.0, K);
+  M(geo('Box', 1.0, 0.08, 4.04), '#e9e4d8', 16.98, TOP - 0.04, 5.0, K);
+  M(geo('Box', 0.06, 0.36, 4.0), '#bfe4ff', 17.45, TOP + 0.2, 5.0, K, { noShadow: true, mat: { transparent: true, opacity: 0.22 } });     // sklo
+  M(geo('Box', 0.1, 0.05, 4.0), '#ff9a3c', 17.0, 1.75, 5.0, K, { noShadow: true, mat: { emissive: '#ff7a1a' } });                        // ohřívací lampa
+  M(geo('Box', 0.05, 0.75, 0.05), '#8d949b', 17.0, 1.38, 3.05, K, { noShadow: true });
+  M(geo('Box', 0.05, 0.75, 0.05), '#8d949b', 17.0, 1.38, 6.95, K, { noShadow: true });
+  const vd = labelSprite('HOTOVÁ JÍDLA', '#e9fff5', 1.5);
+  vd.position.set(17.9, 2.1, 5.0);
+  K.add(vd);
+
+  // stoly, židle, svítidla
+  seats = [];
+  TABLE_X.forEach((tx, ix) => TABLE_Z.forEach((tz, iz) => {
+    K.add(makeTable(tx, tz, (ix + iz) % 2 ? '#f4efe6' : '#d85a5a'));
+    M(geo('Cylinder', 0.01, 0.01, 0.9, 5), '#222222', tx, DWH - 0.45, tz, K, { noShadow: true });
+    M(geo('Cylinder', 0.14, 0.42, 0.28, 12), '#e65100', tx, 1.95, tz, K, { noShadow: true });
+    M(geo('Sphere', 0.1, 8, 6), '#fff3b0', tx, 1.78, tz, K, { noShadow: true, mat: { emissive: '#fff3b0' } });
+    const aisle = iz === 0 ? 1 : -1;
+    [[aisle, false], [-aisle, ix !== 1]].forEach(([sgn, amb]) => {
+      const cz = tz + sgn * 0.95;
+      K.add(makeChair(tx, cz, Math.atan2(0, -sgn)));           // opěradlo na vzdálené straně od stolu
+      seats.push({ tx, tz, cx: tx, cz, ambient: amb, busy: false, face: Math.atan2(0, -sgn) });
+    });
+  }));
+  // pasivní hosté, ať je jídelna živá
+  seats.filter((s) => s.ambient).forEach((s) => {
+    const person = makePerson(randomLook());
+    setSeated(person, true);
+    const n = { person, x: s.cx, z: s.cz, ang: s.face, tang: s.face, phase: Math.random() * 6, eating: true, path: [], speed: 0 };
+    npcApply(n);
+    person.g.position.y = 0;
+    dining.add(person.g);
+    const sign = s.cz > s.tz ? -1 : 1;
+    const plate = makePlate(['bun', 'meat'], false);
+    plate.scale.setScalar(0.5);
+    plate.position.set(s.tx + (Math.random() - 0.5) * 0.2, 0.78, s.tz + (s.cz > s.tz ? 0.3 : -0.3));
+    dining.add(plate);
+    n.t0 = Math.random() * 10; n.sign = sign;
+    ambients.push(n);
+  });
+  [[17.5, 0.8], [34.0, 0.8], [34.0, 9.2], [17.5, 9.2]].forEach((q) => K.add(makePlant(q[0], q[1])));
+
+  // číšníci
+  WAITER_HOME.forEach((h, i) => {
+    const person = makePerson({ shirt: '#ffffff', skin: rnd(SKINS), hair: rnd(HAIRS), apron: true, pants: '#1d1d1d' });
+    const w = { person, x: h[0], z: h[1], ang: -Math.PI / 2, tang: -Math.PI / 2, phase: 0, speed: 2.4, path: [], home: h, state: 'idle', job: null, look: [SLOT_X, h[1]], carry: false, onArrive: null };
+    npcApply(w);
+    dining.add(person.g);
+    waiters.push(w);
+  });
+}
+
+/* ---------- hosté ---------- */
+function spawnCustomer(o, instant) {
+  const free = seats.filter((s) => !s.ambient && !s.busy);
+  if (!free.length) return;
+  const seat = rnd(free);
+  seat.busy = true;
+  const rec = o.r ? recipes[o.r] : null;
+  const person = makePerson(randomLook());
+  const c = {
+    id: o.id, seat, person, x: DOOR.x, z: DOOR.z, ang: Math.PI / 2, tang: Math.PI / 2, phase: Math.random() * 6, speed: 2.0 + Math.random() * 0.6,
+    path: [], onArrive: null, state: 'walkin', angry: false, gone: false, eating: false, eatT: 0, leaving: false,
+    foodIcons: rec ? rec.items.map((k) => ICONS[k]).join('') : '', drinkIcon: o.dr ? ICONS[o.dr] : '',
+    served: { food: !o.r, drink: !o.dr }, delivered: { food: !o.r, drink: !o.dr }, tableItems: [], bubble: makeBubble(), frac: 1, look: null,
+  };
+  c.served = { food: false, drink: false }; c.delivered = { food: false, drink: false };
+  if (!o.r || o.fd) { c.served.food = true; c.delivered.food = true; }
+  if (!o.dr || o.dd) { c.served.drink = true; c.delivered.drink = true; }
+  person.g.add(c.bubble.sp);
+  dining.add(person.g);
+  if (instant) sitCustomer(c);
+  else {
+    c.path = [[33.0, AISLE_Z], [seat.tx + 1.1, AISLE_Z], [seat.tx + 1.1, seat.cz], [seat.cx, seat.cz]];
+    c.onArrive = () => sitCustomer(c);
+  }
+  npcApply(c);
+  customers.set(o.id, c);
+}
+function sitCustomer(c) {
+  c.state = 'wait';
+  c.x = c.seat.cx; c.z = c.seat.cz; c.ang = c.seat.face; c.tang = c.seat.face;
+  c.path = [];
+  setSeated(c.person, true);
+  npcApply(c);
+}
+function customerLeave(c, angry) {
+  if (c.leaving) return;
+  const wasWalking = c.state === 'walkin';
+  c.leaving = true; c.angry = angry; c.state = 'leave'; c.eating = false;
+  c.tableItems.forEach((t) => dining.remove(t));
+  c.tableItems = [];
+  setSeated(c.person, false);
+  c.speed = angry ? 3.4 : 2.2;
+  c.path = wasWalking ? [[33.0, AISLE_Z], [DOOR.x + 0.4, DOOR.z]]
+    : [[c.seat.tx + 1.1, c.seat.cz], [c.seat.tx + 1.1, AISLE_Z], [33.0, AISLE_Z], [DOOR.x + 0.4, DOOR.z]];
+  c.onArrive = () => {
+    dining.remove(c.person.g);
+    c.seat.busy = false;
+    customers.delete(c.id);
+  };
+  c.bubble.sig = '';
+}
+
+function syncCustomers(orders) {
+  const ids = new Set();
+  orders.forEach((o) => {
+    ids.add(o.id);
+    let c = customers.get(o.id);
+    if (!c) { spawnCustomer(o, o.l - o.t > 5); c = customers.get(o.id); }
+    if (c) c.frac = Math.max(0, o.t / o.l);
+  });
+  for (const c of customers.values()) {
+    if (!ids.has(c.id)) c.gone = true;        // objednávka zmizela: splněna, nebo propadla
+  }
+}
+
+/* ---------- rozvoz jídla ---------- */
+function restaurantServe(e) {
+  if (!dining) return;
+  const part = e.part === 'drink' ? 'drink' : 'food';
+  const c = customers.get(e.o);
+  if (c) c.served[part] = true;
+  let si = slots.indexOf(null);
+  if (si < 0) si = 0;                                      // všechna místa plná – přepíše se nejstarší
+  const item = part === 'drink' ? makeCup(e.d) : makePlate(e.c || [], false);
+  item.scale.setScalar(part === 'drink' ? 0.6 : 0.55);
+  item.position.set(SLOT_X, TOP, SLOT_Z[si]);
+  dining.add(item);
+  if (slots[si]) dining.remove(slots[si]);
+  slots[si] = item;
+  jobs.push({ id: e.o, part, slot: si, item, readyAt: restClock + 1.6, taken: false, e });
+}
+function restaurantAngry(id) {
+  const c = customers.get(id);
+  if (c && !c.leaving) customerLeave(c, true);
+}
+
+function waiterGoHome(w) {
+  const tail = w.job ? w.job.back : [];
+  w.job = null; w.carry = false; w.state = 'return';
+  w.path = tail.concat([[19.6, AISLE_Z], w.home]);
+  w.onArrive = () => { w.state = 'idle'; w.look = [SLOT_X, w.home[1]]; };
+}
+function waiterPickup(w) {
+  const j = w.job;
+  const si = slots.indexOf(j.item);
+  if (si >= 0) slots[si] = null;
+  dining.remove(j.item);
+  clearGroup(w.person.holder);
+  const tray = j.part === 'drink' ? makeCup(j.e.d) : makePlate(j.e.c || [], false);
+  tray.scale.setScalar(j.part === 'drink' ? 0.6 : 0.55);
+  w.person.holder.add(tray);
+  w.carry = true;
+  const c = customers.get(j.id);
+  if (!c || c.leaving) {
+    w.job.back = []; clearGroup(w.person.holder);
+    const k = jobs.indexOf(j); if (k >= 0) jobs.splice(k, 1);
+    waiterGoHome(w); return;
+  }
+  const s = c.seat;
+  j.back = [[s.tx + 1.1, s.tz], [s.tx + 1.1, AISLE_Z]];
+  w.state = 'deliver';
+  w.path = [[19.6, AISLE_Z], [s.tx + 1.1, AISLE_Z], [s.tx + 1.1, s.tz], [s.tx + 0.95, s.tz]];
+  w.look = [s.tx, s.tz];
+  w.onArrive = () => {
+    const cc = customers.get(j.id);
+    clearGroup(w.person.holder);
+    if (cc && !cc.leaving) {
+      const it = j.part === 'drink' ? makeCup(j.e.d) : makePlate(j.e.c || [], false);
+      it.scale.setScalar(j.part === 'drink' ? 0.55 : 0.5);
+      const side = cc.seat.cz > cc.seat.tz ? 1 : -1;
+      it.position.set(cc.seat.tx + (j.part === 'drink' ? 0.3 : -0.12), 0.78, cc.seat.tz + side * 0.3);
+      dining.add(it);
+      cc.tableItems.push(it);
+      cc.delivered[j.part] = true;
+      cc.eating = true; cc.eatT = 4.5; cc.state = 'eat';
+    }
+    const i = jobs.indexOf(j);
+    if (i >= 0) jobs.splice(i, 1);
+    waiterGoHome(w);
+  };
+}
+
+function updateRestaurant(dt, tm) {
+  if (!dining) return;
+  restClock += dt;
+  const now = restClock;
+  for (const c of [...customers.values()]) {
+    npcStep(c, dt);
+    npcApply(c);
+    animPerson(c, tm);
+    if (c.state === 'eat') {
+      c.eatT -= dt;
+      if (c.eatT <= 0) { c.eating = false; c.state = 'wait'; c.bubble.sig = ''; }
+    }
+    if (!c.leaving && c.state !== 'walkin') {
+      const allDone = c.delivered.food && c.delivered.drink;
+      if (c.gone && !c.eating && allDone) customerLeave(c, false);
+      else if (c.gone && !c.eating && !(c.served.food && c.served.drink) && !c.angry) customerLeave(c, true);     // propadlá objednávka
+    }
+    c.person.g.visible = true;
+    const showBubble = c.state === 'wait' || c.state === 'eat' || (c.leaving && c.angry);
+    c.bubble.sp.visible = showBubble && !(c.delivered.food && c.delivered.drink && c.state === 'wait');
+    if (c.bubble.sp.visible) drawBubble(c, c.frac);
+  }
+  for (const w of waiters) {
+    if (w.state === 'idle') {
+      const j = jobs.find((q) => !q.taken && now >= q.readyAt);
+      if (j) {
+        j.taken = true; w.job = j; w.state = 'toCounter';
+        w.path = [[18.6, SLOT_Z[j.slot]]];
+        w.look = [SLOT_X, SLOT_Z[j.slot]];
+        w.onArrive = () => waiterPickup(w);
+      }
+    }
+    npcStep(w, dt);
+    npcApply(w);
+    animPerson(w, tm);
+  }
+  ambients.forEach((n) => {
+    n.person.armR.rotation.x = -1.0 + Math.max(0, Math.sin(tm * 1.7 + n.t0)) * 0.5;
+    n.person.body.rotation.x = Math.sin(tm * 0.9 + n.t0) * 0.03;
   });
 }
 
@@ -1571,7 +2075,7 @@ function updateHighlight() {
 let lastFrame = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - lastFrame) / 1000);
+  const dt = Math.max(0, Math.min(0.05, (now - lastFrame) / 1000));
   lastFrame = now;
   if ((view !== 'game' && view !== 'end' && view !== 'shop') || !map || !snap || !kitchen) return;
   update(dt);
@@ -1580,6 +2084,7 @@ function frame(now) {
   updateStations(now / 1000);
   updateFires(now / 1000);
   updateRats(dt, now / 1000);
+  updateRestaurant(dt, now / 1000);
   updateSpray(now / 1000);
   updateLights(dt);
   updateHighlight();

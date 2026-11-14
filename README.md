@@ -56,3 +56,10 @@ Za výdejním pultem je celá jídelna: stoly, židle, okna, vchod a hosté. S k
 - **Vzhled postavy:** v menu si vybereš barvu a styl čepice (kuchařská čepice, šátek, kšiltovka), barvu pleti a oblečení. Ukládá se do prohlížeče a ostatní hráči tě vidí tak, jak sis ho nastavil.
 - **Restaurace:** Burger bar, Sushi bar (rýžovar, maki a nigiri) a Pizzerie (pec, těsto → omáčka → sýr → feferonky/houby). V režimu Klasika si restauraci volí hostitel v lobby zdarma. Ve Dnech začínáš s burgerem a další restaurace kupuješ v obchodě mezi dny (Sushi 250 Kč, Pizzerie 180 Kč), kdykoli pak můžeš pro další den přepnout. Každá restaurace má vlastní suroviny, recepty, sporák a vzhled kuchyně i jídelny.
 - **MVP:** na konci hry (a po každém dni ve Dnech) se vyhodnotí nejlepší hráč podle odevzdaných jídel a pití, krájení, vaření, mytí, plácnutých krys a uhašených požárů. Najdeš tam i žebříček všech hráčů.
+
+## Sklad, police a ukládání ve Dnech
+- **Sklad:** pod kuchyní je nová místnost (dveře dole vlevo) s regály plnými krabic. V kuchyni jsou **police** (a kohoutky) s omezenou zásobou – max. 15 ks. Když dojdou, přineseš ze skladu **krabici** (10 ks) a vložíš ji do police nebo kohoutku (E). Krabice zpomaluje chůzi a nedá se vyhodit; plnou krabici lze vrátit na regál.
+- **Klasika:** ve skladu je krabic nekonečně, jen je musíš donášet.
+- **Dny:** v obchodě už nekupuješ jednotlivé kusy, ale **krabice** (10 ks, levnější než po kuse). Sklad pojme max. 8 krabic od druhu, regály ukazují, kolik jich zbývá.
+- **Ukládání:** ve Dnech si každá restaurace pamatuje svou kuchyni – věci na pultech, zásoby na policích, čisté i špinavé talíře. Přes noc se uklidí jen oheň, krysy a spálené jídlo.
+- **Rozložení:** burger bar zůstal, sushi bar má police na levé zdi, ostrov uprostřed a rýžovary u horní zdi, pizzerie má police dole, dva ostrůvky s prkénky a pece u baru s pitím.

@@ -49,12 +49,19 @@ const RAT_EAT = 3.2;         // s hlodání, než krysa něco odnese
 // Režim „Dny“: zásoby, nákup surovin, nájem
 const DAY_TIME = 120;        // délka jednoho dne (s)
 const START_MONEY = 50;
-const START_STOCK = { bun: 5, meat: 5, cheese: 3, lettuce: 3, tomato: 3, cola: 4, lemon: 3, juice: 3 };
 const PRICES = {   // základní ceny
   bun: 2, meat: 5, cheese: 3, lettuce: 2, tomato: 2, cola: 2, lemon: 2, juice: 3,
   rice: 2, fish: 5, nori: 2, cucumber: 2, shrimp: 5, dough: 2, sauce: 1, pepperoni: 4, mushroom: 3,
 };
-const STOCK_CAP = 30;        // max. zásoba jedné suroviny
+// Sklad a police
+const BOX_SIZE = 10;                   // kusů v jedné krabici
+const SHELF_CAP = 15;                  // max. kusů na polici v kuchyni
+const BOX_CAP = 8;                     // max. krabic jednoho druhu ve skladu (Dny)
+const BOX_DISCOUNT = 0.8;              // krabice je levnější než kusy
+const BOX_SPEED = 0.75;                // s krabicí v ruce se jde pomaleji
+const SHELF_START_CLASSIC = 6;         // na začátku kola je police zpola plná
+const SHELF_START_DAYS = 8;
+const START_BOXES = { bun: 1, meat: 1, cheese: 1, lettuce: 1, tomato: 1, cola: 1, lemon: 1, juice: 1 };
 const RENT_BASE = 25, RENT_STEP = 10;
 const rentFor = (day) => RENT_BASE + RENT_STEP * (day - 1);
 const ING_CS = {
@@ -67,26 +74,66 @@ const SPAWNS = [[3.5, 2.5], [12.5, 2.5], [3.5, 7.5], [12.5, 7.5]];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 /*
- * Mapa kuchyně (16 x 10)
- *  . podlaha   # zeď        C pult (odkládání)
- *  B houska  M maso  S sýr  L salát  T rajče   (bedny se surovinami)
- *  K krájecí prkénko   F sporák   P výdejní pult
+ * Mapa = kuchyně (řádky 0–9) + sklad pod ní (řádky 10–16). Každá restaurace má vlastní rozložení kuchyně.
+ *  . podlaha   # zeď        C pult (odkládání)    = palety (ozdoba)
+ *  B M S L T R H N G Q J V I Z   police se surovinami v kuchyni (podle restaurace)
+ *  b m s l t r h n g q j v i z c e o   regály s krabicemi ve skladu
+ *  K krájecí prkénko   F sporák / rýžovar / pec   P výdejní pult (okno do jídelny)
  *  X koš   D stoh čistých talířů   W dřez (mytí)
  *  U kelímky   A kohoutek cola   E kohoutek limonáda   O kohoutek džus
  *  Y držák hasicího přístroje
  */
-const MAP = [
-  '#CBCMCSCLCTCCCC#',
+const KITCHENS = {
+  burger: [
+    '#CBCMCSCLCTCCCC#',
+    '#..............#',
+    '#..............#',
+    'C..............P',
+    'F....CKKKCC....P',
+    'C....CCFFCC....P',
+    'Y..............P',
+    '#..............#',
+    '#..............#',
+    '#X..UAEOCCCWWDC#',
+  ],
+  // sushi: police na levé stěně, prostřední ostrov, rýžovary u horní zdi
+  sushi: [
+    '#CCCFCCFCCCCCCC#',
+    'R..............#',
+    'H..............#',
+    'N...KKKK.......P',
+    'G...CCCC.......P',
+    'Q..............P',
+    'Y..............P',
+    '#..............#',
+    '#..............#',
+    '#X..WWCCUAEOCDC#',
+  ],
+  // pizza: police na spodní zdi, dva ostrůvky s prkénky, pece u pultu s pitím
+  pizza: [
+    '#CCUAEOCCFFCCWC#',
+    '#..............#',
+    '#..............#',
+    'C..KK...KK.....P',
+    'Y..CC...CC.....P',
+    'C..............P',
+    'C..............P',
+    '#..............#',
+    '#..............#',
+    '#X..JCVCSCICZWD#',
+  ],
+};
+const RACK_LETTERS = { burger: 'bmslt', sushi: 'rhngq', pizza: 'jvsiz' };
+const warehouseRows = (letters) => [
+  '##..############',
   '#..............#',
   '#..............#',
-  'C..............P',
-  'F....CKKKCC....P',
-  'C....CCFFCC....P',
-  'Y..............P',
+  '#.....====.....#',
+  '#.....====.....#',
   '#..............#',
-  '#..............#',
-  '#XCCUAEOCCCWWDC#',
+  '#' + letters + 'C' + 'ceo' + 'CCCCC' + '#',
 ];
+const MAP = KITCHENS.burger.concat(warehouseRows(RACK_LETTERS.burger));
 const H = MAP.length;
 const W = MAP[0].length;
 MAP.forEach((row, i) => {
@@ -98,6 +145,10 @@ const CRATES = {
   B: 'bun', M: 'meat', S: 'cheese', L: 'lettuce', T: 'tomato',          // burger
   R: 'rice', H: 'fish', N: 'nori', G: 'cucumber', Q: 'shrimp',          // sushi
   J: 'dough', V: 'sauce', I: 'pepperoni', Z: 'mushroom',                // pizza (+ S sýr)
+};
+const RACKS = {
+  b: 'bun', m: 'meat', s: 'cheese', l: 'lettuce', t: 'tomato', r: 'rice', h: 'fish', n: 'nori', g: 'cucumber', q: 'shrimp',
+  j: 'dough', v: 'sauce', i: 'pepperoni', z: 'mushroom', c: 'cola', e: 'lemon', o: 'juice',
 };
 const TAPS = { A: 'cola', E: 'lemon', O: 'juice' };
 const DRINK_IDS = ['cola', 'lemon', 'juice'];
@@ -132,7 +183,6 @@ for (const k in ING) {
 const REST = {
   burger: {
     id: 'burger', name: 'Burger bar', icon: '🍔', cost: 0, pay: 1, stove: 'Sporák',
-    top: '#CBCMCSCLCTCCCC#',
     starter: { bun: 5, meat: 5, cheese: 3, lettuce: 3, tomato: 3 },
     recipes: [
       { id: 'cheese', name: 'Cheeseburger', items: ['bun', 'meat', 'cheese'], w: 3 },
@@ -143,7 +193,6 @@ const REST = {
   },
   sushi: {
     id: 'sushi', name: 'Sushi bar', icon: '🍣', cost: 250, pay: 1.2, stove: 'Rýžovar',
-    top: '#CRCHCNCGCQCCCC#',
     starter: { rice: 6, fish: 4, nori: 5, cucumber: 3, shrimp: 3 },
     recipes: [
       { id: 'nigiri', name: 'Nigiri s rybou', items: ['rice', 'fish'], w: 3 },
@@ -155,7 +204,6 @@ const REST = {
   },
   pizza: {
     id: 'pizza', name: 'Pizzerie', icon: '🍕', cost: 180, pay: 1.1, stove: 'Pec',
-    top: '#CJCVCSCICZCCCC#',
     starter: { dough: 5, sauce: 5, cheese: 4, pepperoni: 3, mushroom: 3 },
     recipes: [
       { id: 'margherita', name: 'Margherita', items: ['dough', 'sauce', 'cheese'], w: 3 },
@@ -170,10 +218,11 @@ const RECIPES_ALL = [].concat(...REST_IDS.map((id) => REST[id].recipes));
 const RECIPES_PUBLIC = {};
 RECIPES_ALL.forEach((r) => { RECIPES_PUBLIC[r.id] = { name: r.name, items: r.items }; });
 const MAPS = {};
-REST_IDS.forEach((id) => { MAPS[id] = MAP.map((row, i) => (i === 0 ? REST[id].top : row)); });
+REST_IDS.forEach((id) => { MAPS[id] = KITCHENS[id].concat(warehouseRows(RACK_LETTERS[id])); });
 const restPublic = (id) => ({
   id, name: REST[id].name, icon: REST[id].icon, stove: REST[id].stove,
-  crates: Object.fromEntries([...REST[id].top].filter((c) => CRATES[c]).map((c) => [c, CRATES[c]])),
+  crates: Object.fromEntries([...MAPS[id].join('')].filter((c) => CRATES[c]).map((c) => [c, CRATES[c]])),
+  racks: Object.fromEntries([...MAPS[id].join('')].filter((c) => RACKS[c]).map((c) => [c, RACKS[c]])),
 });
 const recipesPublicOf = (id) => Object.fromEntries(REST[id].recipes.map((r) => [r.id, { name: r.name, items: r.items }]));
 
@@ -235,7 +284,8 @@ app.get('/healthz', (req, res) => res.type('text').send('ok'));
 /* ------------------------------------------------------------------ */
 const rooms = new Map();
 
-const tileAt = (x, y) => (y < 0 || y >= H || x < 0 || x >= W ? '#' : MAP[y][x]);      // jen pro kolize (ve všech mapách stejné)
+let curMap = MAP;           // mapa místnosti, která se právě zpracovává (kolize)
+const tileAt = (x, y) => (y < 0 || y >= H || x < 0 || x >= W ? '#' : curMap[y][x]);
 const tileAtR = (room, x, y) => (y < 0 || y >= H || x < 0 || x >= W ? '#' : room.map[y][x]);
 const isSolid = (x, y) => tileAt(x, y) !== '.';
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -248,6 +298,9 @@ const isIng = (it) => !!it && it.t === 'i';
 const plateReady = (it) => isIng(it) && it.s === NEED[it.k];
 const isCup = (it) => !!it && it.t === 'c';
 const isExt = (it) => !!it && it.t === 'x';
+const isBox = (it) => !!it && it.t === 'b';
+const newBox = (k) => ({ t: 'b', k, n: BOX_SIZE });
+const boxPrice = (room, k) => Math.max(1, Math.round(room.prices[k] * BOX_SIZE * BOX_DISCOUNT));
 const newCup = () => ({ t: 'c', d: null });
 const newExt = () => ({ t: 'x', c: 1 });
 const up = (room, id) => (room.upgrades && room.upgrades[id]) || 0;
@@ -420,6 +473,7 @@ const playerOf = (socket) => {
 /* ------------------------------------------------------------------ */
 function buildStations(room) {
   room.st = {}; room.stoves = []; room.sinks = [];
+  const startN = room.mode === 'days' ? SHELF_START_DAYS : SHELF_START_CLASSIC;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const ch = room.map[y][x], key = x + ',' + y;
@@ -431,17 +485,32 @@ function buildStations(room) {
       } else if (ch === 'W') {
         const s = { type: 'W', x, y, prog: 0 };
         room.st[key] = s; room.sinks.push(s);
-      } else if (TAPS[ch]) room.st[key] = { type: 'T', x, y, drink: TAPS[ch], prog: 0 };
+      } else if (TAPS[ch]) room.st[key] = { type: 'T', x, y, drink: TAPS[ch], prog: 0, n: startN };
+      else if (CRATES[ch]) room.st[key] = { type: 'S', x, y, k: CRATES[ch], n: startN };      // police v kuchyni
+      else if (RACKS[ch]) room.st[key] = { type: 'R', x, y, k: RACKS[ch] };                    // regál ve skladu
       else if (ch === 'Y') room.st[key] = { type: 'Y', x, y, has: true };
     }
   }
+}
+
+// kolik kusů dané suroviny je v policích (všech kuchyní restaurace, které se hrály)
+function shelfUnits(room, k) {
+  let n = 0;
+  const sets = [room.st].concat(Object.values(room.saved || {}).map((v) => v.st));
+  const seen = new Set();
+  for (const st of sets) {
+    if (!st || seen.has(st)) continue;
+    seen.add(st);
+    for (const key in st) { const x = st[key]; if ((x.type === 'S' && x.k === k) || (x.type === 'T' && x.drink === k)) n += x.n; }
+  }
+  return n;
 }
 
 function startGame(room) {
   for (const ps of Object.values(room.pstats)) { ps.t = blankStat(); ps.d = blankStat(); }
   if (room.mode === 'days') {
     room.owned = { burger: true }; room.nextRest = 'burger'; applyRest(room, 'burger');
-    room.day = 1; room.money = START_MONEY; room.stock = Object.assign({}, START_STOCK);
+    room.day = 1; room.money = START_MONEY; room.boxes = Object.assign({}, START_BOXES); room.saved = {};
     room.totalDelivered = 0; room.totalExpired = 0; room.lastSummary = null;
     room.upgrades = {};
     planDay(room);
@@ -506,8 +575,21 @@ function beginRound(room) {
   room.ready.clear();
   room.orders = []; room.orderSeq = 0; room.nextOrder = 1;
   room.returns = []; room.events = [];
-  room.plates = START_PLATES + 2 * up(room, 'plates'); room.dirty = 0;
-  buildStations(room);
+  curMap = room.map;
+  const sv = room.mode === 'days' ? room.saved[room.rest] : null;
+  if (sv) {                                    // Dny: kuchyně si pamatuje, co v ní zbylo
+    room.st = sv.st; room.stoves = []; room.sinks = [];
+    for (const key in room.st) {
+      const o = room.st[key];
+      if (o.type === 'F') { room.stoves.push(o); o.warned = false; o.smolder = 0; }
+      if (o.type === 'W') room.sinks.push(o);
+    }
+    room.plates = Math.max(sv.plates, START_PLATES + 2 * up(room, 'plates'));
+    room.dirty = sv.dirty;
+  } else {
+    room.plates = START_PLATES + 2 * up(room, 'plates'); room.dirty = 0;
+    buildStations(room);
+  }
   for (const p of room.players.values()) {
     p.x = SPAWNS[p.slot][0]; p.y = SPAWNS[p.slot][1];
     p.fx = 0; p.fy = 1; p.held = null;
@@ -521,7 +603,8 @@ function beginRound(room) {
 /* ---------- Režim „Dny“: obchod mezi dny ---------- */
 function shopPayload(room) {
   return {
-    day: room.day, money: room.money, stock: room.stock, prices: room.prices, base: PRICES, cap: STOCK_CAP,
+    day: room.day, money: room.money, boxes: room.boxes, boxPrice: Object.fromEntries(Object.keys(room.prices).map((k) => [k, boxPrice(room, k)])), boxSize: BOX_SIZE, boxCap: BOX_CAP,
+    shelves: Object.fromEntries(Object.keys(room.prices).map((k) => [k, shelfUnits(room, k)])), prices: room.prices, base: PRICES,
     rent: rentFor(room.day), summary: room.lastSummary,
     ready: [...room.ready], players: room.players.size,
     rests: REST_IDS.map((id) => ({ id, name: REST[id].name, icon: REST[id].icon, cost: REST[id].cost, owned: !!room.owned[id], sel: room.nextRest === id, pay: REST[id].pay, recipes: REST[id].recipes.map((r) => r.name) })),
@@ -544,7 +627,7 @@ function checkReady(room) {
 
 // jde z toho, co zbylo (a za co se dá koupit), uvařit aspoň jedno jídlo?
 function canProduce(room) {
-  return REST_IDS.filter((id) => room.owned[id]).some((id) => REST[id].recipes.some((r) => r.items.reduce((c, k) => c + ((room.stock[k] || 0) > 0 ? 0 : room.prices[k]), 0) <= room.money));
+  return REST_IDS.filter((id) => room.owned[id]).some((id) => REST[id].recipes.some((r) => r.items.reduce((c, k) => c + (((room.boxes[k] || 0) > 0 || shelfUnits(room, k) > 0) ? 0 : boxPrice(room, k)), 0) <= room.money));
 }
 
 function endDay(room) {
@@ -555,7 +638,22 @@ function endDay(room) {
   const gOk = goalOk(room, g);
   const bonus = gOk ? g.reward : 0;
   room.money += bonus - rent;
-  for (const p of room.players.values()) { p.held = null; p.input = { dx: 0, dy: 0, hold: false }; }
+  // úklid po zavírací době: hasicák do držáku, plné krabice do skladu, talíř na stoh
+  for (const p of room.players.values()) {
+    const h = p.held;
+    if (isExt(h)) restoreExt(room);
+    else if (isPlate(h)) room.plates++;
+    else if (isBox(h) && h.n === BOX_SIZE) room.boxes[h.k] = Math.min(BOX_CAP, (room.boxes[h.k] || 0) + 1);
+    p.held = null; p.input = { dx: 0, dy: 0, hold: false };
+  }
+  // oheň zhasne, krysy odejdou, spálené jídlo se uklidí; věci na pultech a v polici zůstanou na další den
+  room.fires = {}; room.rats = []; room.chaos = null;
+  for (const key in room.st) {
+    const o = room.st[key];
+    if (o.type === 'F' && o.item && o.item.s === 'burnt') { o.item = null; resetStation(o); }
+  }
+  room.dirty += room.returns.length; room.returns = [];
+  room.saved[room.rest] = { st: room.st, plates: room.plates, dirty: room.dirty };
   ev(room, 'end', 0, 0);
   io.to(room.code).emit('state', snapshot(room));
   room.lastSummary = {
@@ -726,17 +824,27 @@ function restoreExt(room) {
 }
 
 // naplnění kelímku u kohoutku (držení i mačkání)
+// přesune kusy z krabice do police / kohoutku (max. SHELF_CAP)
+function refillFromBox(room, p, st, fx, fy) {
+  const box = p.held;
+  const space = SHELF_CAP - st.n;
+  if (space <= 0) return ev(room, 'no', fx, fy, { m: 'Police je plná (max ' + SHELF_CAP + ')' });
+  const moved = Math.min(space, box.n);
+  st.n += moved; box.n -= moved;
+  if (box.n <= 0) p.held = null;
+  return ev(room, 'drop', fx, fy, { m: '+' + moved });
+}
 function checkFill(room, p, st, fx, fy) {
   if (st.prog < 1) return;
   st.prog = 0;
-  if (room.mode === 'days') room.stock[st.drink] = Math.max(0, (room.stock[st.drink] || 0) - 1);
+  st.n = Math.max(0, st.n - 1);
   p.held.d = st.drink;
   bump(room, p.id, 'pours');
   ev(room, 'done', fx, fy);
 }
 function fillBlocked(room, p, st, fx, fy) {
-  if (room.mode === 'days' && (room.stock[st.drink] || 0) <= 0) {
-    if (p.sfxT <= 0) { ev(room, 'no', fx, fy, { m: 'Došlo ' + ING_CS[st.drink] + '!' }); p.sfxT = 1; }
+  if (st.n <= 0) {
+    if (p.sfxT <= 0) { ev(room, 'no', fx, fy, { m: 'Došlo ' + ING_CS[st.drink] + '! Doplň ze skladu' }); p.sfxT = 1; }
     return true;
   }
   return false;
@@ -748,7 +856,11 @@ function igniteAt(room, x, y) {
   if (room.fires[key] || !FLAMMABLE.has(tileAtR(room, x, y))) return false;
   room.fires[key] = { x, y, hp: 1, spread: FIRE_SPREAD * (0.8 + Math.random() * 0.5) };
   const st = room.st[key];
-  if (st) { destroyItem(room, st); if (st.type === 'T') st.prog = 0; }
+  if (st) {
+    destroyItem(room, st);
+    if (st.type === 'T') st.prog = 0;
+    if (st.type === 'S' || st.type === 'T') st.n = Math.floor(st.n / 2);      // část zásob shoří
+  }
   ev(room, 'fire', x + 0.5, y + 0.5, { m: 'Hoří!' });
   return true;
 }
@@ -781,11 +893,14 @@ function spray(room, p, key, f, dt) {
 }
 
 /* ---------- Krysy ---------- */
-const FLOOR_EDGE = [];
-for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (MAP[y][x] === '.' && (x === 1 || x === W - 2 || y === 1 || y === H - 2)) FLOOR_EDGE.push([x, y]);
+const FLOOR_EDGE = {};
+REST_IDS.forEach((id) => {
+  FLOOR_EDGE[id] = [];
+  for (let y = 1; y <= 8; y++) for (let x = 1; x < W - 1; x++) if (MAPS[id][y][x] === '.' && (x === 1 || x === W - 2 || y === 1 || y === 8)) FLOOR_EDGE[id].push([x, y]);
+});
 
 function spawnRat(room) {
-  const [tx, ty] = pick(FLOOR_EDGE);
+  const [tx, ty] = pick(FLOOR_EDGE[room.rest]);
   room.rats.push({ id: ++room.ratSeq, x: tx + 0.5, y: ty + 0.5, a: 0, st: 'seek', goal: null, t: 0, nib: 0, stuck: 0, home: { x: tx + 0.5, y: ty + 0.5 } });
   ev(room, 'squeak', tx + 0.5, ty + 0.5);
 }
@@ -798,10 +913,11 @@ function pickRatGoal(room, rat) {
     if ((st.type === 'C' || st.type === 'K' || st.type === 'F') && st.item) cands.push({ kind: 'item', gx: st.x, gy: st.y });
   }
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (y > 9) break;
     const ch = room.map[y][x];
     if (room.fires[x + ',' + y]) continue;
     if (ch === 'D' && room.plates > 0) cands.push({ kind: 'plates', gx: x, gy: y });
-    else if (CRATES[ch] && room.mode === 'days' && (room.stock[CRATES[ch]] || 0) > 0) cands.push({ kind: 'crate', gx: x, gy: y, k: CRATES[ch] });
+    else if (CRATES[ch] && room.st[x + ',' + y] && room.st[x + ',' + y].n > 0) cands.push({ kind: 'crate', gx: x, gy: y });
   }
   for (let tries = 0; tries < 6 && cands.length; tries++) {
     const g = cands.splice(Math.floor(Math.random() * cands.length), 1)[0];
@@ -835,7 +951,7 @@ function ratGoalValid(room, g) {
   if (room.fires[key]) return false;
   if (g.kind === 'item') return !!(room.st[key] && room.st[key].item);
   if (g.kind === 'plates') return room.plates > 0;
-  return room.mode === 'days' && (room.stock[g.k] || 0) > 0;
+  return !!(room.st[key] && room.st[key].n > 0);
 }
 
 function updateRats(room, dt) {
@@ -870,7 +986,7 @@ function updateRats(room, dt) {
         let m = 'Krysa to sežrala!';
         if (g.kind === 'item') destroyItem(room, room.st[key]);
         else if (g.kind === 'plates') { room.plates = Math.max(0, room.plates - 1); m = 'Krysa ukradla talíř!'; }
-        else { room.stock[g.k] = Math.max(0, (room.stock[g.k] || 0) - 2); m = 'Krysa žere zásoby!'; }
+        else { room.st[key].n = Math.max(0, room.st[key].n - 2); m = 'Krysa žere zásoby!'; }
         ev(room, 'ratsteal', g.gx + 0.5, g.gy + 0.5, { m });
         r.st = 'flee';
       }
@@ -903,6 +1019,7 @@ function updateChaos(room, dt) {
 }
 
 function interact(room, p) {
+  curMap = room.map;
   const [tx, ty] = targetOf(p);
   const ch = tileAtR(room, tx, ty);
   const st = room.st[tx + ',' + ty];
@@ -925,17 +1042,31 @@ function interact(room, p) {
     return ev(room, 'no', fx, fy, { m: 'Hoří! Vezmi hasicák!' });
   }
 
-  if (CRATES[ch]) {
+  if (CRATES[ch]) {                       // police v kuchyni
     if (!held) {
-      const k = CRATES[ch];
-      if (room.mode === 'days') {
-        if ((room.stock[k] || 0) <= 0) return ev(room, 'no', fx, fy, { m: 'Došlo ' + ING_CS[k] + '!' });
-        room.stock[k]--;
-      }
-      p.held = newIngredient(k);
+      if (st.n <= 0) return ev(room, 'no', fx, fy, { m: 'Došlo ' + ING_CS[st.k] + '! Doplň ze skladu' });
+      st.n--;
+      p.held = newIngredient(st.k);
       return ev(room, 'pick', fx, fy);
     }
+    if (isBox(held) && held.k === st.k) return refillFromBox(room, p, st, fx, fy);
     return ev(room, 'no', fx, fy);
+  }
+  if (RACKS[ch]) {                        // regál ve skladu
+    if (!held) {
+      if (room.mode === 'days') {
+        if ((room.boxes[st.k] || 0) <= 0) return ev(room, 'no', fx, fy, { m: 'Sklad je prázdný – kup krabice' });
+        room.boxes[st.k]--;
+      }
+      p.held = newBox(st.k);
+      return ev(room, 'pick', fx, fy);
+    }
+    if (isBox(held) && held.k === st.k && held.n === BOX_SIZE) {
+      if (room.mode === 'days') room.boxes[st.k] = Math.min(BOX_CAP, (room.boxes[st.k] || 0) + 1);
+      p.held = null;
+      return ev(room, 'drop', fx, fy);
+    }
+    return ev(room, 'no', fx, fy, { m: isBox(held) ? 'Vrátit jde jen plná krabice' : '' });
   }
   switch (ch) {
     case 'C': case 'K': case 'F':
@@ -962,6 +1093,7 @@ function interact(room, p) {
       return ev(room, 'no', fx, fy);
 
     case 'A': case 'E': case 'O': // kohoutky s pitím
+      if (isBox(held) && held.k === st.drink) return refillFromBox(room, p, st, fx, fy);
       if (!isCup(held)) return ev(room, 'no', fx, fy, { m: 'Potřebuješ kelímek' });
       if (held.d) return ev(room, 'no', fx, fy, { m: 'Kelímek je plný' });
       if (fillBlocked(room, p, st, fx, fy)) return undefined;
@@ -980,6 +1112,7 @@ function interact(room, p) {
     case 'X': // koš
       if (!held) return ev(room, 'no', fx, fy);
       if (isExt(held)) return ev(room, 'no', fx, fy, { m: 'Hasicák nevyhazuj!' });
+      if (isBox(held)) return ev(room, 'no', fx, fy, { m: 'Krabici nevyhazuj!' });
       if (isCup(held)) {
         if (!held.d) return ev(room, 'no', fx, fy);
         held.d = null;                       // pití se vylije, kelímek zůstane
@@ -1124,6 +1257,7 @@ function updateOrders(room, dt) {
 
 function tickRoom(room, dt) {
   if (room.state !== 'playing') return;
+  curMap = room.map;
   if (room.cd > 0) {
     room.cd = Math.max(0, room.cd - dt);
     if (room.cd === 0) ev(room, 'go', 0, 0);
@@ -1136,7 +1270,7 @@ function tickRoom(room, dt) {
     const { dx, dy } = p.input;
     if (dx || dy) {
       // analogový pohyb z pohledu první osoby (délka vektoru max. 1)
-      const k = SPEED * (1 + 0.08 * up(room, 'boots')) * dt / Math.max(1, Math.hypot(dx, dy));
+      const k = SPEED * (1 + 0.08 * up(room, 'boots')) * (isBox(p.held) ? BOX_SPEED : 1) * dt / Math.max(1, Math.hypot(dx, dy));
       moveBy(p, dx * k, dy * k);
     }
   }
@@ -1167,7 +1301,9 @@ function snapshot(room) {
     else if (st.type === 'K') { if (st.item) s[key] = { i: st.item, p: r2(st.prog) }; }
     else if (st.type === 'F') { if (st.item) s[key] = { i: st.item, p: r2(st.prog), b: r2(st.burn), f: r2(Math.min(1, (st.smolder || 0) / FIRE_IGNITE_DELAY)) }; }
     else if (st.type === 'W') { if (st.prog > 0) s[key] = { p: r2(st.prog) }; }
-    else if (st.type === 'T') { if (st.prog > 0) s[key] = { p: r2(st.prog) }; }
+    else if (st.type === 'T') s[key] = { n: st.n, p: r2(st.prog) };
+    else if (st.type === 'S') s[key] = { n: st.n };
+    else if (st.type === 'R') s[key] = { n: room.mode === 'days' ? (room.boxes[st.k] || 0) : -1 };
     else if (st.type === 'Y') s[key] = { x: st.has ? 1 : 0 };
   }
   const events = room.events;
@@ -1189,7 +1325,7 @@ function snapshot(room) {
     ev: events,
   };
   if (room.mode === 'days') {
-    out.sk = room.stock; out.dy = room.day;
+    out.dy = room.day;
     if (room.goal) out.g = { k: room.goal.k, n: room.goal.need, v: goalProgress(room, room.goal), r: room.goal.reward, t: room.goal.text };
   }
   return out;
@@ -1254,7 +1390,7 @@ io.on('connection', (socket) => {
     if (r.cost > room.money) return socket.emit('err', { m: 'Na tuhle restauraci nemáš dost peněz.' });
     room.money -= r.cost;
     room.owned[d.id] = true;
-    for (const k in r.starter) room.stock[k] = Math.min(STOCK_CAP, (room.stock[k] || 0) + r.starter[k]);
+    for (const k in r.starter) room.boxes[k] = Math.min(BOX_CAP, (room.boxes[k] || 0) + 1);       // pár krabic na start
     room.nextRest = d.id;
     broadcastShop(room);
   });
@@ -1273,13 +1409,13 @@ io.on('connection', (socket) => {
     if (!Object.prototype.hasOwnProperty.call(room.prices, k)) return;
     let n = Math.floor(Number(d.n));
     if (!(n >= 1)) return;
-    const have = room.stock[k] || 0;
-    n = Math.min(n, STOCK_CAP - have);
-    if (n <= 0) return socket.emit('err', { m: 'Sklad je plný (max ' + STOCK_CAP + ').' });
-    const cost = room.prices[k] * n;
+    const have = room.boxes[k] || 0;
+    n = Math.min(n, BOX_CAP - have);
+    if (n <= 0) return socket.emit('err', { m: 'Sklad je plný (max ' + BOX_CAP + ' krabic).' });
+    const cost = boxPrice(room, k) * n;
     if (cost > room.money) return socket.emit('err', { m: 'Nemáš dost peněz.' });
     room.money -= cost;
-    room.stock[k] = have + n;
+    room.boxes[k] = have + n;
     broadcastShop(room);
   });
 

@@ -210,18 +210,36 @@ canvas#game { position: absolute; inset: 0; display: block; width: 100%; height:
 @keyframes blink { 50% { color: #ffd2d2; } }
 
 #orders {
-  position: absolute; top: 46px; left: 0; right: 0;
-  display: flex; gap: 8px; justify-content: center; flex-wrap: nowrap;
+  position: absolute; top: 44px; left: 0; right: 0;
+  display: flex; gap: 6px; justify-content: center; flex-wrap: nowrap; align-items: flex-start;
   padding: 0 8px;
 }
 #orders.empty::before { content: "Čekáme na první objednávku…"; color: #b79a75; font-style: italic; font-size: 0.9rem; }
 .order {
-  width: 138px; padding: 6px 8px 8px; border-radius: 10px;
+  flex: 1 1 0; min-width: 0; max-width: 176px; padding: 5px 6px 6px; border-radius: 10px;
   background: #f7ecd2; color: #3a2615; box-shadow: 0 4px 12px rgba(0,0,0,.45);
 }
-.order b { display: block; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.order .oi { margin: 3px 0 5px; font-size: 1.15rem; letter-spacing: 1px; white-space: nowrap; }
-.order .ot { height: 6px; border-radius: 3px; background: rgba(0,0,0,.18); overflow: hidden; }
+.order .oh { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.order .on { font-size: .76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.order .otime { flex: 0 0 auto; font-size: .68rem; font-weight: 800; color: #7a5b3a; }
+.order .ofood, .order .odrink { position: relative; display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.order .chip {
+  position: relative; flex: 1 1 30px; max-width: 46px; min-width: 28px;
+  display: flex; flex-direction: column; align-items: center; padding: 2px 1px 1px;
+  background: rgba(0,0,0,.08); border-radius: 7px;
+}
+.order .chip em { font-style: normal; font-size: 1.1rem; line-height: 1.1; }
+.order .chip small { font-size: .52rem; line-height: 1.1; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #5a4128; }
+.order .chip s { position: absolute; top: -4px; right: -3px; font-size: .6rem; text-decoration: none; filter: drop-shadow(0 0 1px #fff); }
+.order .odrink .chip { flex-direction: row; justify-content: center; gap: 4px; max-width: none; flex: 1 1 100%; background: rgba(33,150,243,.18); padding: 2px 6px; }
+.order .odrink .chip small { font-size: .62rem; }
+.order .osep { text-align: center; font-weight: 800; font-size: .72rem; line-height: 1; margin-top: 3px; color: #7a5b3a; }
+.order .ofood.done .chip, .order .odrink.done .chip { opacity: .28; }
+.order .ofood.done::after, .order .odrink.done::after {
+  content: '✔'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem; font-weight: 800; color: #2e7d32; text-shadow: 0 0 3px #fff;
+}
+.order .ot { height: 6px; margin-top: 5px; border-radius: 3px; background: rgba(0,0,0,.18); overflow: hidden; }
 .order .ot i { display: block; height: 100%; border-radius: 3px; }
 .order.urgent { animation: shake .5s infinite; }
 @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
@@ -249,8 +267,12 @@ canvas#game { position: absolute; inset: 0; display: block; width: 100%; height:
 @keyframes go { 0% { opacity: 1; transform: scale(.6); } 30% { transform: scale(1.1); } 100% { opacity: 0; transform: scale(1.2); } }
 
 @media (max-width: 700px) {
-  .order { width: 96px; }
-  .order .oi { font-size: .9rem; }
+  #orders { gap: 4px; padding: 0 4px; }
+  .order { max-width: 130px; padding: 4px 4px 5px; }
+  .order .on { font-size: .66rem; }
+  .order .chip { flex-basis: 24px; min-width: 22px; }
+  .order .chip em { font-size: .95rem; }
+  .order .chip small { display: none; }
   #timer, #score { font-size: 1.1rem; min-width: 70px; }
 }
 
@@ -287,8 +309,8 @@ canvas#game { cursor: crosshair; }
 .tag.zero { background: #b3261e; }
 
 /* ---------- Chaos, cíl, hasicák ---------- */
-#goal { position: absolute; top: 46px; left: 50%; transform: translateX(-50%); margin-top: 84px; padding: 4px 14px; border-radius: 999px;
-  background: rgba(0,0,0,.6); color: #ffe9b0; font-weight: 800; font-size: .85rem; white-space: nowrap; }
+#goal { position: absolute; left: 12px; bottom: 14px; max-width: 280px; padding: 6px 12px; border-radius: 12px;
+  background: rgba(0,0,0,.65); color: #ffe9b0; font-weight: 800; font-size: .82rem; line-height: 1.25; }
 #goal.done { background: rgba(30,110,50,.85); color: #d8ffdf; }
 #goal.failed { background: rgba(130,30,30,.85); color: #ffd6d2; text-decoration: line-through; }
 #banner { position: absolute; left: 50%; top: 20%; transform: translateX(-50%) scale(.8); padding: 10px 22px; border-radius: 14px; opacity: 0;
@@ -300,8 +322,6 @@ canvas#game { cursor: crosshair; }
   background: rgba(190,30,30,.85); color: #fff; font-weight: 800; font-size: .9rem; white-space: nowrap; }
 .firebar { width: 46px; }
 .order.vip { background: linear-gradient(#fff2b8, #f3d36a); box-shadow: 0 0 0 2px #ffb300, 0 4px 12px rgba(0,0,0,.45); }
-.order .of.done, .order .od.done { opacity: .28; text-decoration: line-through; }
-.order .oi { display: flex; gap: 8px; align-items: center; }
 
 /* ---------- Obchod: nové části ---------- */
 .panel.wide { max-height: 92vh; overflow-y: auto; }
@@ -368,3 +388,7 @@ canvas#game { cursor: crosshair; }
 .board .bp { color: #ffd27a; font-weight: 700; flex: 0 0 auto; }
 .board small { flex: 1; text-align: right; font-size: .72rem; color: #d9b98a; }
 .players .avwrap { margin-right: 6px; }
+
+.shoprow .sname b { display: block; }
+.shoprow .sname small { display: block; font-weight: 400; font-size: .72rem; color: #d9b98a; }
+.shoprow .sstock { width: 88px; }

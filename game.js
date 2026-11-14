@@ -58,7 +58,7 @@ const THREE = window.THREE;
 /* ---------------------------------------------------------------------
  *  Konstanty (shodné se serverem)
  * ------------------------------------------------------------------- */
-const COLS = 16, ROWS = 10;
+const COLS = 16;
 const SPEED = 4.6, HALF = 0.3, REACH = 0.75;
 const TOP = 0.98;                                   // výška pracovních desek
 const NAMES = {
@@ -71,6 +71,7 @@ const ICONS = {
 };
 const DRINK_COL = { cola: '#3b1d0e', lemon: '#eef266', juice: '#ff9a1f' };
 const TAP = { A: 'cola', E: 'lemon', O: 'juice' };
+let rackMap = {};                       // regály ve skladu (písmeno -> surovina)
 let crateMap = { B: 'bun', M: 'meat', S: 'cheese', L: 'lettuce', T: 'tomato' };   // bedny aktuální restaurace (ze serveru)
 const PLATE_STATE = {
   bun: 'raw', meat: 'cooked', cheese: 'raw', lettuce: 'chopped', tomato: 'chopped',
@@ -479,7 +480,7 @@ socket.on('gameStart', (d) => {
   map = d.map; recipes = d.recipes;
   gameMode = d.mode || 'classic'; dayNo = d.day || 1;
   speedMult = 1 + 0.08 * ((d.up && d.up.boots) || 0);
-  if (d.rest) { restId = d.rest.id; crateMap = d.rest.crates || crateMap; }
+  if (d.rest) { restId = d.rest.id; crateMap = d.rest.crates || crateMap; rackMap = d.rest.racks || {}; }
   theme = THEMES[restId] || THEMES.burger;
   snap = null; me = null; floaters.forEach((f) => f.el.remove()); floaters = [];
   clearActors();
@@ -619,25 +620,31 @@ function renderShop(d) {
     rb.appendChild(card);
   });
 
-  // suroviny (ceny se každý den mění)
+  // krabice se zásobami (ceny se každý den mění)
   const box = $('shopItems');
   box.innerHTML = '';
+  const bs = d.boxSize || 10;
   (d.ings || []).concat(DRINK_KEYS).forEach((k) => {
-    const have = d.stock[k] || 0, price = d.prices[k], base = d.base ? d.base[k] : price;
+    const have = (d.boxes && d.boxes[k]) || 0, price = d.boxPrice[k];
+    const base = Math.max(1, Math.round((d.base ? d.base[k] : d.prices[k]) * bs * 0.8));
+    const shelf = (d.shelves && d.shelves[k]) || 0;
     const row = document.createElement('div');
     row.className = 'shoprow';
     const nm = document.createElement('span');
-    nm.className = 'sname'; nm.textContent = ICONS[k] + ' ' + NAMES[k];
+    nm.className = 'sname';
+    const t1 = document.createElement('b'); t1.textContent = ICONS[k] + ' ' + NAMES[k] + ' (' + bs + ' ks)';
+    const t2 = document.createElement('small'); t2.textContent = 'na policích ' + shelf + ' ks';
+    nm.append(t1, t2);
     const st = document.createElement('span');
-    st.className = 'sstock' + (have === 0 ? ' zero' : ''); st.textContent = 'sklad ' + have;
+    st.className = 'sstock' + (have === 0 ? ' zero' : ''); st.textContent = '📦 ' + have + ' / ' + d.boxCap;
     const pr = document.createElement('span');
     pr.className = 'sprice' + (price < base ? ' sale' : price > base ? ' dear' : '');
     pr.textContent = (price < base ? '▼ ' : price > base ? '▲ ' : '') + price + ' Kč';
     row.append(nm, st, pr);
-    [1, 5].forEach((n) => {
+    [1, 3].forEach((n) => {
       const b = document.createElement('button');
       b.className = 'btn small'; b.textContent = '+' + n;
-      b.disabled = price * n > d.money || have + n > d.cap;
+      b.disabled = price * n > d.money || have + n > d.boxCap;
       b.onclick = () => { Sound.init(); socket.emit('buy', { k, n }); };
       row.appendChild(b);
     });
@@ -764,7 +771,7 @@ function releaseMouse() { dragging = false; try { if (document.exitPointerLock) 
 /* ---------------------------------------------------------------------
  *  Pohyb (predikce lokálního hráče – stejná pravidla jako na serveru)
  * ------------------------------------------------------------------- */
-const isSolid = (x, y) => !map || y < 0 || y >= ROWS || x < 0 || x >= COLS || map[y][x] !== '.';
+const isSolid = (x, y) => !map || y < 0 || y >= map.length || x < 0 || x >= COLS || map[y][x] !== '.';
 
 function blocked(x, y) {
   const x0 = Math.floor(x - HALF), x1 = Math.floor(x + HALF);
@@ -828,6 +835,7 @@ function handleEvents(list) {
         g.classList.remove('show'); void g.offsetWidth; g.classList.add('show');
         break;
       }
+      case 'drop': Sound.play('drop'); if (e.m) float(e.x, 1.4, e.y, e.m, '#8dff9f'); break;
       case 'fire': Sound.play('fire'); float(e.x, 1.6, e.y, '🔥 Hoří!', '#ffb347'); break;
       case 'extinguish': Sound.play('extinguish'); float(e.x, 1.6, e.y, '✔ Uhašeno!', '#8dff9f'); break;
       case 'splat': Sound.play('splat'); float(e.x, 0.6, e.y, '🐀 +' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
@@ -867,10 +875,10 @@ camera.add(torch);
 let dark = 0;
 const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(14, 16, 9);
-sun.target.position.set(17, 0, 5);
+sun.target.position.set(17, 0, 6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -21, right: 21, top: 10, bottom: -10, near: 1, far: 50 });
+Object.assign(sun.shadow.camera, { left: -21, right: 21, top: 13, bottom: -13, near: 1, far: 50 });
 sun.shadow.bias = -0.0006;
 scene.add(sun, sun.target);
 
@@ -1158,7 +1166,29 @@ function makeExt() {
   M(geo('Sphere', 0.045, 8, 6), '#fdd835', 0.12, 0.55, 0.1, g, { noShadow: true });
   return g;
 }
+const iconTexCache = {};
+function iconTex(k) {
+  if (iconTexCache[k]) return iconTexCache[k];
+  const cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 64;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#fff7e0'; x.fillRect(0, 0, 64, 64);
+  x.font = '44px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(ICONS[k] || '?', 32, 36);
+  return (iconTexCache[k] = new THREE.CanvasTexture(cv));
+}
+function makeBoxModel(k) {
+  const g = new THREE.Group();
+  M(geo('Box', 0.44, 0.34, 0.4), '#b98b4f', 0, 0.17, 0, g);
+  M(geo('Box', 0.46, 0.03, 0.1), '#d9b87a', 0, 0.345, 0, g, { noShadow: true });
+  const lbl = new THREE.Mesh(geo('Plane', 0.22, 0.22), new THREE.MeshBasicMaterial({ map: iconTex(k) }));
+  lbl.position.set(0, 0.17, 0.205);
+  g.add(lbl);
+  return g;
+}
 function makeItem(item) {
+  if (item.t === 'b') { const b = makeBoxModel(item.k); b.scale.setScalar(1.35); return b; }
   if (item.t === 'c') { const c = makeCup(item.d); c.scale.setScalar(0.8); return c; }
   if (item.t === 'x') { const e = makeExt(); e.scale.setScalar(0.75); return e; }
   if (item.t === 'p') { const p = makePlate(item.c, false); p.scale.setScalar(0.74); return p; }
@@ -1203,11 +1233,18 @@ function buildKitchen() {
   ground.rotation.x = -Math.PI / 2;
   const WH = 2.8;
   M(geo('Box', 17, WH, 0.5), theme.kwall, 8, WH / 2, -0.25, kitchen);          // zadní zeď
-  M(geo('Box', 17, WH, 0.5), theme.kwall, 8, WH / 2, 10.25, kitchen);          // přední zeď
-  M(geo('Box', 0.5, WH, 11), theme.kwall, -0.25, WH / 2, 5, kitchen);          // levá zeď
+  M(geo('Box', 0.5, WH, 18), theme.kwall, -0.25, WH / 2, 8.5, kitchen);        // levá zeď (kuchyně + sklad)
+  M(geo('Box', 0.5, WH, 7.5), '#9a9488', 16.25, WH / 2, 13.75, kitchen);       // pravá zeď skladu
+  M(geo('Box', 17, WH, 0.5), '#9a9488', 8, WH / 2, 17.25, kitchen);            // zadní zeď skladu
   M(geo('Box', 17, 0.3, 0.55), '#46455a', 8, 0.15, -0.0, kitchen, { noShadow: true });
   const ceil = M(geo('Plane', 17, 11), theme.ceil, 8, WH, 5, kitchen, { noShadow: true });
   ceil.rotation.x = Math.PI / 2;
+  const wceil = M(geo('Plane', 17, 7.5), '#d9d3c4', 8, WH, 13.75, kitchen, { noShadow: true });
+  wceil.rotation.x = Math.PI / 2;
+  [4, 12].forEach((lx) => M(geo('Box', 1.8, 0.06, 0.6), '#fffbe8', lx, WH - 0.04, 13.5, kitchen, { noShadow: true, mat: { emissive: '#fff2c0' } }));
+  const skl = labelSprite('SKLAD', '#ffe9b0', 1.4);
+  skl.position.set(3, 2.2, 10.9);
+  kitchen.add(skl);
   for (let lx = 0; lx < 3; lx++) {
     for (let lz = 0; lz < 2; lz++) {
       const lamp = M(geo('Box', 1.6, 0.06, 0.7), '#fffbe8', 3 + lx * 5, WH - 0.04, 2.6 + lz * 4.8, kitchen, { noShadow: true, mat: { emissive: '#fff2c0' } });
@@ -1216,12 +1253,12 @@ function buildKitchen() {
   }
 
   const wTiles = [];
-  for (let y = 0; y < ROWS; y++) {
+  for (let y = 0; y < map.length; y++) {
     for (let x = 0; x < COLS; x++) {
       const ch = map[y][x];
       const cx = x + 0.5, cz = y + 0.5;
       if (ch === '.') {
-        const f = M(geo('Box', 1, 0.1, 1), (x + y) % 2 ? '#e6d6b2' : '#eddfbf', cx, -0.05, cz, kitchen, { noShadow: true });
+        const f = M(geo('Box', 1, 0.1, 1), y >= 10 ? ((x + y) % 2 ? '#c9c1b1' : '#d2cabb') : ((x + y) % 2 ? '#e6d6b2' : '#eddfbf'), cx, -0.05, cz, kitchen, { noShadow: true });
         f.castShadow = false;
         continue;
       }
@@ -1230,19 +1267,32 @@ function buildKitchen() {
         M(geo('Box', 1.02, 0.14, 1.02), '#46455a', cx, 0.07, cz, kitchen);
         continue;
       }
+      if (rackMap[ch]) {                                  // regál s krabicemi ve skladu
+        const rk = rackMap[ch];
+        [[-0.46, -0.44], [0.46, -0.44], [-0.46, 0.44], [0.46, 0.44]].forEach((q) => M(geo('Box', 0.06, 1.9, 0.06), '#8d949b', cx + q[0], 0.95, cz + q[1], kitchen));
+        [0.5, 1.1, 1.7].forEach((yy) => M(geo('Box', 0.98, 0.05, 0.92), '#aab2b9', cx, yy, cz, kitchen));
+        const lb = labelSprite(NAMES[rk], '#fff', 0.95);
+        lb.position.set(cx, 2.15, cz + 0.2);
+        kitchen.add(lb);
+        dyn[x + ',' + y] = { ch: 'R', x, y, k: rk };
+        addText(x, y, 'rack', rk);
+        continue;
+      }
+      if (ch === '=') {                                   // palety (ozdoba)
+        M(geo('Box', 0.96, 0.14, 0.96), '#a47a3f', cx, 0.07, cz, kitchen);
+        [[-0.22, 0.34, -0.2, 0], [0.2, 0.34, 0.2, 0.5], [-0.18, 0.7, 0.18, 0.2]].forEach((q) => {
+          const bx = M(geo('Box', 0.42, 0.34, 0.42), '#b98b4f', cx + q[0], q[1] + 0.07, cz + q[2], kitchen);
+          bx.rotation.y = q[3];
+        });
+        continue;
+      }
       if (crateMap[ch]) {
         counter(kitchen, x, y);
         M(geo('Box', 0.74, 0.34, 0.74), '#a9743c', cx, TOP + 0.17, cz, kitchen);
         M(geo('Box', 0.78, 0.05, 0.78), '#8a5c2b', cx, TOP + 0.34, cz, kitchen);
         M(geo('Box', 0.76, 0.04, 0.02), '#6f4a20', cx, TOP + 0.12, cz + 0.375, kitchen, { noShadow: true });
         const k = crateMap[ch];
-        [[-0.17, -0.1], [0.17, -0.1], [0, 0.17]].forEach((q, i) => {
-          const it = makeIng(k, 'raw');
-          it.scale.setScalar(0.38);
-          it.position.set(cx + q[0], TOP + 0.36, cz + q[1]);
-          it.rotation.y = i * 1.3;
-          kitchen.add(it);
-        });
+        dyn[x + ',' + y] = { ch: 'S', x, y, k };          // vystavené kusy podle zásoby na polici
         const lb = labelSprite(NAMES[k], '#fff', 0.95);
         lb.position.set(cx, TOP + 0.75, cz + 0.2);
         kitchen.add(lb);
@@ -1366,7 +1416,7 @@ function buildKitchen() {
   for (const key in dyn) {
     const d = dyn[key];
     d.g = new THREE.Group();
-    d.g.position.set(d.x + 0.5, TOP, d.y + 0.5);
+    d.g.position.set(d.x + 0.5, d.ch === 'R' ? 0 : TOP, d.y + 0.5);
     d.sig = null;
     kitchen.add(d.g);
   }
@@ -1402,6 +1452,8 @@ function updateStations(tm) {
     else if (d.ch === 'D') sig = String(Math.min(snap.d, 8));
     else if (d.ch === 'W') sig = String(Math.floor((snap.w + (d.wn - 1 - d.wi)) / d.wn));
     else if (d.ch === 'Y') sig = s && s.x ? '1' : '0';
+    else if (d.ch === 'S') sig = !s || !s.n ? '0' : s.n <= 5 ? '1' : s.n <= 10 ? '2' : '3';
+    else if (d.ch === 'R') sig = String(!s ? 0 : s.n < 0 ? 6 : Math.min(6, s.n));
     if (sig !== d.sig) { d.sig = sig; rebuildStation(d, s); }
     if (d.ch === 'F') animateStove(d, tm);
   }
@@ -1453,6 +1505,22 @@ function rebuildStation(d, s) {
         const f = M(geo('Cone', 0.06, 0.2, 6), i % 2 ? '#ffb300' : '#ff6d00', Math.cos(a) * 0.27, 0.06, dz + Math.sin(a) * 0.27, d.g, { noShadow: true, mat: { emissive: i % 2 ? '#aa6600' : '#aa3300' } });
         d.flames.push(f);
       }
+    }
+  } else if (d.ch === 'S') {
+    const cnt = Number(d.sig);
+    [[-0.17, -0.1], [0.17, -0.1], [0, 0.17]].slice(0, cnt).forEach((q, i) => {
+      const it = makeIng(d.k, 'raw');
+      it.scale.setScalar(0.38);
+      it.position.set(q[0], 0.36, q[1]);
+      it.rotation.y = i * 1.3;
+      d.g.add(it);
+    });
+  } else if (d.ch === 'R') {
+    const cnt = Number(d.sig);
+    for (let i = 0; i < cnt; i++) {
+      const bx = makeBoxModel(d.k);
+      bx.position.set(i % 2 ? 0.24 : -0.24, [0.525, 1.125, 1.725][Math.floor(i / 2)], 0);
+      d.g.add(bx);
     }
   } else if (d.ch === 'Y') {
     if (d.sig === '1') { const e = makeExt(); e.scale.setScalar(0.8); e.position.y = 0.05; d.g.add(e); }
@@ -2236,22 +2304,65 @@ function updateHud() {
     if (!e) {
       const el = document.createElement('div');
       el.className = 'order' + (o.v ? ' vip' : '');
-      el.innerHTML = '<b></b><div class="oi"><span class="of"></span><span class="od"></span></div><div class="ot"><i></i></div>';
-      let title = rec ? rec.name + (o.dr ? ' + ' + NAMES[o.dr] : '') : NAMES[o.dr];
-      if (o.v) title = '⭐ ' + title;
-      el.firstChild.textContent = title;
-      el.querySelector('.of').textContent = rec ? rec.items.map((k) => ICONS[k]).join(' ') : '';
-      el.querySelector('.od').textContent = o.dr ? ICONS[o.dr] : '';
+      const head = document.createElement('div');
+      head.className = 'oh';
+      const nm = document.createElement('b');
+      nm.className = 'on';
+      nm.textContent = (o.v ? '⭐ ' : '') + (rec ? rec.name : NAMES[o.dr]);
+      nm.title = nm.textContent;
+      const tm = document.createElement('span');
+      tm.className = 'otime';
+      head.append(nm, tm);
+      el.appendChild(head);
+
+      const mkChip = (k, state) => {
+        const c = document.createElement('span');
+        c.className = 'chip';
+        c.title = NAMES[k] + (state === 'chopped' ? ' (nakrájet)' : state === 'cooked' ? ' (uvařit / upéct)' : '');
+        const em = document.createElement('em'); em.textContent = ICONS[k];
+        const sm = document.createElement('small'); sm.textContent = NAMES[k];
+        c.append(em, sm);
+        if (state === 'chopped' || state === 'cooked') {
+          const bd = document.createElement('s');
+          bd.textContent = state === 'chopped' ? '🔪' : '🔥';
+          c.appendChild(bd);
+        }
+        return c;
+      };
+      let food = null, drink = null;
+      if (rec) {
+        food = document.createElement('div');
+        food.className = 'ofood';
+        rec.items.forEach((k) => food.appendChild(mkChip(k, PLATE_STATE[k])));
+        el.appendChild(food);
+      }
+      if (rec && o.dr) {
+        const sep = document.createElement('div');
+        sep.className = 'osep'; sep.textContent = '+';
+        el.appendChild(sep);
+      }
+      if (o.dr) {
+        drink = document.createElement('div');
+        drink.className = 'odrink';
+        drink.appendChild(mkChip(o.dr, null));
+        el.appendChild(drink);
+      }
+      const bar = document.createElement('div');
+      bar.className = 'ot';
+      bar.appendChild(document.createElement('i'));
+      el.appendChild(bar);
       ordersEl.appendChild(el);
-      e = { el, fill: el.querySelector('i'), of: el.querySelector('.of'), od: el.querySelector('.od') };
+      e = { el, fill: bar.firstChild, food, drink, tm, secs: -1 };
       orderEls.set(o.id, e);
     }
-    e.of.classList.toggle('done', !!o.fd);
-    e.od.classList.toggle('done', !!o.dd);
+    if (e.food) e.food.classList.toggle('done', !!o.fd);
+    if (e.drink) e.drink.classList.toggle('done', !!o.dd);
     const frac = Math.max(0, o.t / o.l);
     e.fill.style.width = Math.max(3, frac * 100) + '%';
     e.fill.style.background = frac > 0.5 ? '#66bb6a' : frac > 0.25 ? '#ffca28' : '#ef5350';
     e.el.classList.toggle('urgent', frac <= 0.25);
+    const secs = Math.ceil(o.t);
+    if (secs !== e.secs) { e.secs = secs; e.tm.textContent = secs + ' s'; }
   });
   for (const [id, e] of [...orderEls]) if (!live.has(id)) { e.el.remove(); orderEls.delete(id); }
   ordersEl.classList.toggle('empty', snap.o.length === 0);
@@ -2281,7 +2392,11 @@ function updateHud() {
   // hasicák v ruce
   const mine = actors.get(myId);
   const ex = $('extInfo');
-  if (mine && mine.h && mine.h.t === 'x') {
+  if (mine && mine.h && mine.h.t === 'b') {
+    const t = '📦 ' + NAMES[mine.h.k] + ' ×' + mine.h.n + '  ·  vlož do police nebo kohoutku (E)';
+    if (ex.textContent !== t) ex.textContent = t;
+    ex.classList.remove('hidden');
+  } else if (mine && mine.h && mine.h.t === 'x') {
     const t = '🧯 ' + Math.round(mine.h.c * 100) + ' %  ·  míř na oheň a drž E / myš';
     if (ex.textContent !== t) ex.textContent = t;
     ex.classList.remove('hidden');
@@ -2341,13 +2456,14 @@ function updateOverlays() {
   }
   // počty talířů
   for (const t of textEls) {
-    if (t.kind === 'stock') {
-      if (!snap.sk) { t.el.classList.add('hidden'); continue; }
-      const n = snap.sk[t.k] || 0;
-      const label = '×' + n;
+    if (t.kind === 'stock' || t.kind === 'rack') {
+      const d = snap.s[t.x + ',' + t.y];
+      if (!d || d.n === undefined) { t.el.classList.add('hidden'); continue; }
+      const n = d.n;
+      const label = t.kind === 'rack' ? (n < 0 ? '📦 ∞' : '📦 ×' + n) : n + '/15';
       if (label !== t.last) { t.last = label; t.el.textContent = label; t.el.classList.toggle('zero', n === 0); }
       t.el.classList.remove('hidden');
-      place(t.el, t.x + 0.5, TOP + 1.05, t.y + 0.5);
+      place(t.el, t.x + 0.5, t.kind === 'rack' ? 2.4 : TOP + 1.05, t.y + 0.5);
       continue;
     }
     const n = t.kind === 'plates' ? snap.d : snap.w;
@@ -2390,7 +2506,9 @@ function update(dt) {
   const walking = Math.hypot(v.dx, v.dy) > 0.01;
   if (me) {
     me.fx = v.fx; me.fy = v.fy;
-    if (playing && walking) moveBy(me, v.dx * SPEED * speedMult * dt, v.dy * SPEED * speedMult * dt);
+    const ah = actors.get(myId);
+    const bm = ah && ah.h && ah.h.t === 'b' ? 0.75 : 1;           // s krabicí se jde pomaleji
+    if (playing && walking) moveBy(me, v.dx * SPEED * speedMult * bm * dt, v.dy * SPEED * speedMult * bm * dt);
   }
   for (const a of actors.values()) {
     if (a.id === myId && me) {
@@ -2425,7 +2543,7 @@ function updateLights(dt) {
 function updateHighlight() {
   if (!me || view !== 'game') { hilite.visible = false; return; }
   const [tx, ty] = targetTile(me);
-  const ch = tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS ? map[ty][tx] : '#';
+  const ch = tx >= 0 && ty >= 0 && tx < COLS && ty < map.length ? map[ty][tx] : '#';
   if (ch === '.' || ch === '#') { hilite.visible = false; return; }
   hilite.visible = true;
   hilite.position.set(tx + 0.5, TOP + 0.015, ty + 0.5);

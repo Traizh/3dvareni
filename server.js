@@ -257,16 +257,41 @@ const MODIFIERS = [
   { id: 'vermin', n: 'Krysí den', d: 'Víc krys než obvykle. Pořiď pasti a hlídej sklad!', w: 2 },
   { id: 'heat', n: 'Vedro v kuchyni', d: 'Sporáky jedou naplno: maso se peče rychleji, ale i rychleji hoří.', w: 2 },
 ];
-// Trvalá vylepšení (kupují se mezi dny)
+// Trvalá vylepšení (kupují se mezi dny). cat = záložka v obchodě, minDay = od kterého dne se dají koupit.
 const UPGRADES = {
-  knife: { name: 'Ostrý nůž', icon: '🔪', desc: 'Krájení o 25 % rychlejší za úroveň', cost: [40, 70, 110] },
-  boots: { name: 'Sportovní boty', icon: '👟', desc: 'Rychlejší chůze (+8 % za úroveň)', cost: [45, 80, 120] },
-  pan: { name: 'Nepřilnavá pánev', icon: '🍳', desc: 'Maso se pálí o 30 % pomaleji', cost: [40, 70, 100] },
-  plates: { name: 'Sada talířů', icon: '🍽', desc: '+2 čisté talíře na začátku dne', cost: [30, 55, 80] },
-  trap: { name: 'Pasti na krysy', icon: '🐀', desc: 'Méně krys a hlodají pomaleji', cost: [35, 60, 90] },
-  ext: { name: 'Lepší hasicák', icon: '🧯', desc: 'Hasí rychleji a vydrží déle', cost: [40, 75] },
-  sign: { name: 'Neonový nápis', icon: '💡', desc: '+10 % tržeb z objednávek', cost: [60, 100, 150] },
+  // 🍳 Kuchyň
+  knife:    { cat: 'kitchen', minDay: 1, name: 'Ostrý nůž', icon: '🔪', desc: 'Krájení o 25 % rychlejší za úroveň', cost: [60, 110, 180, 280, 420] },
+  oven:     { cat: 'kitchen', minDay: 2, name: 'Silnější plotna', icon: '🔥', desc: 'Pečení a vaření o 15 % rychlejší', cost: [70, 130, 220, 350] },
+  pan:      { cat: 'kitchen', minDay: 1, name: 'Nepřilnavá pánev', icon: '🍳', desc: 'Jídlo se pálí o 30 % pomaleji', cost: [50, 90, 150, 240] },
+  pour:     { cat: 'kitchen', minDay: 2, name: 'Rychlé kohoutky', icon: '🥤', desc: 'Nalévání pití o 25 % rychlejší', cost: [50, 100, 180] },
+  dish:     { cat: 'kitchen', minDay: 2, name: 'Rychlá myčka', icon: '🧼', desc: 'Mytí nádobí o 30 % rychlejší', cost: [60, 110, 190] },
+  plates:   { cat: 'kitchen', minDay: 1, name: 'Sada talířů', icon: '🍽', desc: '+2 čisté talíře na začátku dne', cost: [40, 70, 110, 170] },
+  // 👟 Obsluha
+  boots:    { cat: 'staff', minDay: 1, name: 'Sportovní boty', icon: '👟', desc: 'Rychlejší chůze (+6 % za úroveň)', cost: [60, 100, 170, 260, 400] },
+  cart:     { cat: 'staff', minDay: 2, name: 'Vozík na krabice', icon: '🛒', desc: 'S krabicí se zpomaluješ míň', cost: [60, 110, 190] },
+  tips:     { cat: 'staff', minDay: 2, name: 'Sklenice na spropitné', icon: '💰', desc: '+2 Kč spropitné ke každé vydané části', cost: [70, 130, 220, 350] },
+  // 📦 Sklad
+  shelf:    { cat: 'storage', minDay: 2, name: 'Větší police', icon: '🗄', desc: '+3 ks na každé polici a kohoutku', cost: [60, 110, 190, 300] },
+  bigbox:   { cat: 'storage', minDay: 3, name: 'Velké krabice', icon: '📦', desc: '+2 ks v každé krabici za stejnou cenu', cost: [90, 160, 260, 400] },
+  whcap:    { cat: 'storage', minDay: 2, name: 'Větší sklad', icon: '🏭', desc: '+2 krabice od každého druhu ve skladu', cost: [60, 110, 190] },
+  supplier: { cat: 'storage', minDay: 3, name: 'Dohoda s dodavatelem', icon: '🤝', desc: 'Krabice o 5 % levnější', cost: [80, 140, 230, 360] },
+  // 🧯 Bezpečnost
+  ext:      { cat: 'safety', minDay: 1, name: 'Lepší hasicák', icon: '🧯', desc: 'Hasí rychleji a vydrží déle', cost: [50, 90, 150] },
+  sprinkler:{ cat: 'safety', minDay: 4, name: 'Sprinklery', icon: '🚿', desc: 'Oheň pomalu hasne sám', cost: [120, 200, 320] },
+  trap:     { cat: 'safety', minDay: 1, name: 'Pasti na krysy', icon: '🪤', desc: 'Méně krys a hlodají pomaleji', cost: [45, 80, 130, 210] },
+  cat:      { cat: 'safety', minDay: 3, name: 'Kuchyňská kočka', icon: '🐈', desc: 'Občas chytí krysu za tebe', cost: [100, 170, 280] },
+  insure:   { cat: 'safety', minDay: 3, name: 'Pojištění', icon: '📄', desc: 'Pokuta za propadlou objednávku −25 %', cost: [70, 120, 200] },
+  // 💼 Provoz
+  sign:     { cat: 'biz', minDay: 1, name: 'Neonový nápis', icon: '💡', desc: '+10 % tržeb z objednávek', cost: [80, 140, 230, 360, 540] },
+  patience: { cat: 'biz', minDay: 2, name: 'Pohodlné židle', icon: '🪑', desc: 'Hosté vydrží čekat o 10 % déle', cost: [70, 120, 200, 320, 480] },
+  vip:      { cat: 'biz', minDay: 4, name: 'VIP klub', icon: '⭐', desc: 'Častěji přijdou VIP hosté (dvojnásobná platba)', cost: [90, 160, 270] },
+  hours:    { cat: 'biz', minDay: 3, name: 'Delší otevírací doba', icon: '🕒', desc: 'Den trvá o 10 s déle', cost: [100, 180, 300, 480] },
+  ads:      { cat: 'biz', minDay: 5, name: 'Reklama', icon: '📣', desc: 'Zákazníci chodí o 10 % častěji', cost: [110, 200, 340] },
 };
+const boxSizeOf = (room) => BOX_SIZE + 2 * ((room.upgrades && room.upgrades.bigbox) || 0);
+const boxCapOf = (room) => BOX_CAP + 2 * ((room.upgrades && room.upgrades.whcap) || 0);
+const shelfCapOf = (room) => SHELF_CAP + 3 * ((room.upgrades && room.upgrades.shelf) || 0);
+const boxDiscountOf = (room) => Math.max(0.5, BOX_DISCOUNT - 0.05 * ((room.upgrades && room.upgrades.supplier) || 0));
 
 /* ------------------------------------------------------------------ */
 /*  Express + Socket.io (jeden port, statické soubory z public/)       */
@@ -299,8 +324,8 @@ const plateReady = (it) => isIng(it) && it.s === NEED[it.k];
 const isCup = (it) => !!it && it.t === 'c';
 const isExt = (it) => !!it && it.t === 'x';
 const isBox = (it) => !!it && it.t === 'b';
-const newBox = (k) => ({ t: 'b', k, n: BOX_SIZE });
-const boxPrice = (room, k) => Math.max(1, Math.round(room.prices[k] * BOX_SIZE * BOX_DISCOUNT));
+const newBox = (room, k) => ({ t: 'b', k, n: boxSizeOf(room) });
+const boxPrice = (room, k) => Math.max(1, Math.round(room.prices[k] * BOX_SIZE * boxDiscountOf(room)));
 const newCup = () => ({ t: 'c', d: null });
 const newExt = () => ({ t: 'x', c: 1 });
 const up = (room, id) => (room.upgrades && room.upgrades[id]) || 0;
@@ -562,7 +587,8 @@ function beginRound(room) {
   if (room.mode === 'days') applyRest(room, room.nextRest);
   for (const ps of Object.values(room.pstats)) ps.d = blankStat();
   room.state = 'playing';
-  room.len = room.mode === 'days' ? DAY_TIME : GAME_TIME;
+  room.len = room.mode === 'days' ? DAY_TIME + 10 * up(room, 'hours') : GAME_TIME;
+  room.catT = 18;
   room.time = room.len; room.cd = COUNTDOWN;
   room.score = 0; room.delivered = 0; room.expired = 0;
   room.dayStartMoney = room.money;
@@ -603,7 +629,8 @@ function beginRound(room) {
 /* ---------- Režim „Dny“: obchod mezi dny ---------- */
 function shopPayload(room) {
   return {
-    day: room.day, money: room.money, boxes: room.boxes, boxPrice: Object.fromEntries(Object.keys(room.prices).map((k) => [k, boxPrice(room, k)])), boxSize: BOX_SIZE, boxCap: BOX_CAP,
+    day: room.day, money: room.money, boxes: room.boxes, boxPrice: Object.fromEntries(Object.keys(room.prices).map((k) => [k, boxPrice(room, k)])), boxSize: boxSizeOf(room), boxCap: boxCapOf(room), shelfCap: shelfCapOf(room),
+    baseBox: Object.fromEntries(Object.keys(PRICES).map((k) => [k, Math.max(1, Math.round(PRICES[k] * BOX_SIZE * boxDiscountOf(room)))])),
     shelves: Object.fromEntries(Object.keys(room.prices).map((k) => [k, shelfUnits(room, k)])), prices: room.prices, base: PRICES,
     rent: rentFor(room.day), summary: room.lastSummary,
     ready: [...room.ready], players: room.players.size,
@@ -613,7 +640,7 @@ function shopPayload(room) {
     goal: room.nextGoal ? { text: room.nextGoal.text, reward: room.nextGoal.reward } : null,
     up: Object.keys(UPGRADES).map((id) => {
       const u = UPGRADES[id], lvl = up(room, id);
-      return { id, name: u.name, icon: u.icon, desc: u.desc, lvl, max: u.cost.length, next: lvl < u.cost.length ? u.cost[lvl] : null };
+      return { id, cat: u.cat, minDay: u.minDay, locked: room.day < u.minDay, name: u.name, icon: u.icon, desc: u.desc, lvl, max: u.cost.length, next: lvl < u.cost.length ? u.cost[lvl] : null };
     }),
   };
 }
@@ -643,7 +670,7 @@ function endDay(room) {
     const h = p.held;
     if (isExt(h)) restoreExt(room);
     else if (isPlate(h)) room.plates++;
-    else if (isBox(h) && h.n === BOX_SIZE) room.boxes[h.k] = Math.min(BOX_CAP, (room.boxes[h.k] || 0) + 1);
+    else if (isBox(h) && h.n >= boxSizeOf(room)) room.boxes[h.k] = Math.min(boxCapOf(room), (room.boxes[h.k] || 0) + 1);
     p.held = null; p.input = { dx: 0, dy: 0, hold: false };
   }
   // oheň zhasne, krysy odejdou, spálené jídlo se uklidí; věci na pultech a v polici zůstanou na další den
@@ -794,6 +821,7 @@ function payout(room, o, base, drink) {
   if (drink && thirstOn(room)) v *= 2;
   if (room.mode === 'days') {
     v *= 1 + 0.1 * up(room, 'sign');
+    v += 2 * up(room, 'tips');
     if (modIs(room, 'rush')) v *= 1.25;
   }
   v = Math.round(v);
@@ -824,11 +852,12 @@ function restoreExt(room) {
 }
 
 // naplnění kelímku u kohoutku (držení i mačkání)
-// přesune kusy z krabice do police / kohoutku (max. SHELF_CAP)
+// přesune kusy z krabice do police / kohoutku (max. kapacita police)
 function refillFromBox(room, p, st, fx, fy) {
   const box = p.held;
-  const space = SHELF_CAP - st.n;
-  if (space <= 0) return ev(room, 'no', fx, fy, { m: 'Police je plná (max ' + SHELF_CAP + ')' });
+  const cap = shelfCapOf(room);
+  const space = cap - st.n;
+  if (space <= 0) return ev(room, 'no', fx, fy, { m: 'Police je plná (max ' + cap + ')' });
   const moved = Math.min(space, box.n);
   st.n += moved; box.n -= moved;
   if (box.n <= 0) p.held = null;
@@ -867,6 +896,11 @@ function igniteAt(room, x, y) {
 function updateFires(room, dt) {
   for (const key of Object.keys(room.fires)) {
     const f = room.fires[key];
+    const sp = up(room, 'sprinkler');
+    if (sp) {
+      f.hp -= dt * 0.07 * sp;                                  // sprinklery pomalu hasí
+      if (f.hp <= 0) { delete room.fires[key]; ev(room, 'extinguish', f.x + 0.5, f.y + 0.5, { m: 'Sprinklery!' }); continue; }
+    }
     f.spread -= dt;
     if (f.spread > 0) continue;
     f.spread = FIRE_SPREAD * (0.8 + Math.random() * 0.5);
@@ -956,6 +990,15 @@ function ratGoalValid(room, g) {
 
 function updateRats(room, dt) {
   if (room.cd > 0) return;
+  const cat = up(room, 'cat');
+  if (cat && room.rats.length) {                                  // kočka čas od času chytí krysu
+    room.catT -= dt;
+    if (room.catT <= 0) {
+      const r = room.rats.splice(Math.floor(Math.random() * room.rats.length), 1)[0];
+      ev(room, 'splat', r.x, r.y, { v: 0, cat: true });
+      room.catT = 26 / cat;
+    }
+  }
   room.nextRat -= dt;
   const maxRats = 2 + (modIs(room, 'vermin') ? 2 : 0);
   if (room.nextRat <= 0) {
@@ -1058,11 +1101,11 @@ function interact(room, p) {
         if ((room.boxes[st.k] || 0) <= 0) return ev(room, 'no', fx, fy, { m: 'Sklad je prázdný – kup krabice' });
         room.boxes[st.k]--;
       }
-      p.held = newBox(st.k);
+      p.held = newBox(room, st.k);
       return ev(room, 'pick', fx, fy);
     }
-    if (isBox(held) && held.k === st.k && held.n === BOX_SIZE) {
-      if (room.mode === 'days') room.boxes[st.k] = Math.min(BOX_CAP, (room.boxes[st.k] || 0) + 1);
+    if (isBox(held) && held.k === st.k && held.n >= boxSizeOf(room)) {
+      if (room.mode === 'days') room.boxes[st.k] = Math.min(boxCapOf(room), (room.boxes[st.k] || 0) + 1);
       p.held = null;
       return ev(room, 'drop', fx, fy);
     }
@@ -1082,7 +1125,7 @@ function interact(room, p) {
 
     case 'W': // dřez – mytí špinavých talířů
       if (!held && room.dirty > 0) {
-        st.prog += WASH_BUMP; ev(room, 'wash', fx, fy);
+        st.prog += WASH_BUMP * (1 + 0.3 * up(room, 'dish')); ev(room, 'wash', fx, fy);
         return checkWash(room, st, p);
       }
       return ev(room, 'no', fx, fy);
@@ -1097,7 +1140,7 @@ function interact(room, p) {
       if (!isCup(held)) return ev(room, 'no', fx, fy, { m: 'Potřebuješ kelímek' });
       if (held.d) return ev(room, 'no', fx, fy, { m: 'Kelímek je plný' });
       if (fillBlocked(room, p, st, fx, fy)) return undefined;
-      st.prog += FILL_BUMP;
+      st.prog += FILL_BUMP * (1 + 0.25 * up(room, 'pour'));
       ev(room, 'pour', fx, fy);
       return checkFill(room, p, st, fx, fy);
 
@@ -1163,7 +1206,7 @@ function updateHold(room, p, dt) {
   if (!st) return;
   if (isCup(p.held)) {
     if (st.type === 'T' && !p.held.d && !fillBlocked(room, p, st, fx, fy)) {
-      st.prog += dt / FILL_TIME;
+      st.prog += dt / FILL_TIME * (1 + 0.25 * up(room, 'pour'));
       if (p.sfxT <= 0) { ev(room, 'pour', fx, fy); p.sfxT = 0.22; }
       checkFill(room, p, st, fx, fy);
     }
@@ -1175,7 +1218,7 @@ function updateHold(room, p, dt) {
     if (p.sfxT <= 0) { ev(room, 'chop', fx, fy); p.sfxT = 0.22; }
     checkChop(room, st, p);
   } else if (st.type === 'W' && room.dirty > 0) {
-    st.prog += dt / WASH_TIME;
+    st.prog += dt / WASH_TIME * (1 + 0.3 * up(room, 'dish'));
     if (p.sfxT <= 0) { ev(room, 'wash', fx, fy); p.sfxT = 0.3; }
     checkWash(room, st, p);
   }
@@ -1192,7 +1235,7 @@ function updateStoves(room, dt) {
     if (!it) continue;
     const fx = s.x + 0.5, fy = s.y + 0.5;
     if (it.s === COOK_FROM[it.k]) {
-      s.prog += dt * heat / COOK_TIME;
+      s.prog += dt * heat * (1 + 0.15 * up(room, 'oven')) / COOK_TIME;
       if (s.prog >= 1) { it.s = 'cooked'; s.prog = 1; s.burn = 0; s.warned = false; ev(room, 'done', fx, fy); if (s.by) bump(room, s.by, 'cooks'); }
     } else if (it.s === 'cooked') {
       s.burn += dt * heat / burnT;
@@ -1218,7 +1261,8 @@ function spawnOrder(room) {
   limit = Math.round(limit * (room.players.size <= 1 ? 1.3 : 1));
   let vip = false;
   if (room.mode === 'days') {
-    const chance = modIs(room, 'vip') ? 0.35 : Math.min(0.2, 0.06 + 0.01 * room.day);
+    limit = Math.round(limit * (1 + 0.1 * up(room, 'patience')));
+    const chance = modIs(room, 'vip') ? 0.35 : Math.min(0.2, 0.06 + 0.01 * room.day + 0.04 * up(room, 'vip'));
     vip = Math.random() < chance;
     if (vip) limit = Math.round(limit * 0.75);
   }
@@ -1227,7 +1271,7 @@ function spawnOrder(room) {
 }
 
 function updateOrders(room, dt) {
-  const rush = (chaosIs(room, 'rush') ? 2 : 1) * (modIs(room, 'rush') ? 1.4 : 1);
+  const rush = (chaosIs(room, 'rush') ? 2 : 1) * (modIs(room, 'rush') ? 1.4 : 1) * (room.mode === 'days' ? 1 + 0.1 * up(room, 'ads') : 1);
   room.nextOrder -= dt * rush;
   if (room.orders.length === 0 && room.nextOrder > 2) room.nextOrder = 2;
   if (room.nextOrder <= 0) {
@@ -1248,7 +1292,7 @@ function updateOrders(room, dt) {
     if (o.t <= 0) {
       room.orders.splice(i, 1);
       room.expired++;
-      if (room.mode === 'days') room.money = Math.max(0, room.money - EXPIRE_PENALTY);
+      if (room.mode === 'days') room.money = Math.max(0, room.money - Math.round(EXPIRE_PENALTY * (1 - 0.25 * up(room, 'insure'))));
       else room.score = Math.max(0, room.score - EXPIRE_PENALTY);
       ev(room, 'expire', 0, 0, { o: o.id });
     }
@@ -1270,7 +1314,7 @@ function tickRoom(room, dt) {
     const { dx, dy } = p.input;
     if (dx || dy) {
       // analogový pohyb z pohledu první osoby (délka vektoru max. 1)
-      const k = SPEED * (1 + 0.08 * up(room, 'boots')) * (isBox(p.held) ? BOX_SPEED : 1) * dt / Math.max(1, Math.hypot(dx, dy));
+      const k = SPEED * (1 + 0.06 * up(room, 'boots')) * (isBox(p.held) ? Math.min(1, BOX_SPEED + 0.08 * up(room, 'cart')) : 1) * dt / Math.max(1, Math.hypot(dx, dy));
       moveBy(p, dx * k, dy * k);
     }
   }
@@ -1324,6 +1368,7 @@ function snapshot(room) {
     w: room.dirty,
     ev: events,
   };
+  out.cap = shelfCapOf(room);
   if (room.mode === 'days') {
     out.dy = room.day;
     if (room.goal) out.g = { k: room.goal.k, n: room.goal.need, v: goalProgress(room, room.goal), r: room.goal.reward, t: room.goal.text };
@@ -1390,7 +1435,7 @@ io.on('connection', (socket) => {
     if (r.cost > room.money) return socket.emit('err', { m: 'Na tuhle restauraci nemáš dost peněz.' });
     room.money -= r.cost;
     room.owned[d.id] = true;
-    for (const k in r.starter) room.boxes[k] = Math.min(BOX_CAP, (room.boxes[k] || 0) + 1);       // pár krabic na start
+    for (const k in r.starter) room.boxes[k] = Math.min(boxCapOf(room), (room.boxes[k] || 0) + 1);       // pár krabic na start
     room.nextRest = d.id;
     broadcastShop(room);
   });
@@ -1410,8 +1455,8 @@ io.on('connection', (socket) => {
     let n = Math.floor(Number(d.n));
     if (!(n >= 1)) return;
     const have = room.boxes[k] || 0;
-    n = Math.min(n, BOX_CAP - have);
-    if (n <= 0) return socket.emit('err', { m: 'Sklad je plný (max ' + BOX_CAP + ' krabic).' });
+    n = Math.min(n, boxCapOf(room) - have);
+    if (n <= 0) return socket.emit('err', { m: 'Sklad je plný (max ' + boxCapOf(room) + ' krabic).' });
     const cost = boxPrice(room, k) * n;
     if (cost > room.money) return socket.emit('err', { m: 'Nemáš dost peněz.' });
     room.money -= cost;
@@ -1425,6 +1470,7 @@ io.on('connection', (socket) => {
     const id = String(d.id);
     if (!Object.prototype.hasOwnProperty.call(UPGRADES, id)) return;
     const lvl = up(room, id), u = UPGRADES[id];
+    if (room.day < u.minDay) return socket.emit('err', { m: 'Odemkne se až ve dni ' + u.minDay + '.' });
     if (lvl >= u.cost.length) return socket.emit('err', { m: 'Tohle vylepšení už je na maximu.' });
     if (u.cost[lvl] > room.money) return socket.emit('err', { m: 'Nemáš dost peněz.' });
     room.money -= u.cost[lvl];

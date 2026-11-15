@@ -211,7 +211,8 @@ let lastCd = null, lastTick = null;
 let gameMode = 'classic', dayNo = 1;   // režim aktuální hry
 let menuMode = 'classic';               // režim vybraný v menu
 let shopData = null;
-let speedMult = 1;                       // vylepšení bot
+let speedMult = 1;
+let boxSpeed = 0.75;                       // vylepšení bot
 
 /* ---------------------------------------------------------------------
  *  Socket + stav připojení
@@ -479,7 +480,8 @@ socket.on('disconnect', () => {
 socket.on('gameStart', (d) => {
   map = d.map; recipes = d.recipes;
   gameMode = d.mode || 'classic'; dayNo = d.day || 1;
-  speedMult = 1 + 0.08 * ((d.up && d.up.boots) || 0);
+  speedMult = 1 + 0.06 * ((d.up && d.up.boots) || 0);
+  boxSpeed = Math.min(1, 0.75 + 0.08 * ((d.up && d.up.cart) || 0));
   if (d.rest) { restId = d.rest.id; crateMap = d.rest.crates || crateMap; rackMap = d.rest.racks || {}; }
   theme = THEMES[restId] || THEMES.burger;
   snap = null; me = null; floaters.forEach((f) => f.el.remove()); floaters = [];
@@ -509,6 +511,14 @@ socket.on('gameEnd', (r) => {
   setView('end');
 });
 
+const UP_CATS = [
+  { id: 'kitchen', n: 'Kuchyň', icon: '🍳' },
+  { id: 'staff', n: 'Obsluha', icon: '👟' },
+  { id: 'storage', n: 'Sklad', icon: '📦' },
+  { id: 'safety', n: 'Bezpečnost', icon: '🧯' },
+  { id: 'biz', n: 'Provoz', icon: '💼' },
+];
+let shopTab = 'kitchen';
 const STAT_ICONS = { dishes: '🍽', drinks: '🥤', pours: '🫗', chops: '🔪', cooks: '🔥', washes: '🧼', rats: '🐀', fires: '🧯' };
 function statLine(st) {
   const parts = [];
@@ -626,7 +636,7 @@ function renderShop(d) {
   const bs = d.boxSize || 10;
   (d.ings || []).concat(DRINK_KEYS).forEach((k) => {
     const have = (d.boxes && d.boxes[k]) || 0, price = d.boxPrice[k];
-    const base = Math.max(1, Math.round((d.base ? d.base[k] : d.prices[k]) * bs * 0.8));
+    const base = (d.baseBox && d.baseBox[k]) || price;
     const shelf = (d.shelves && d.shelves[k]) || 0;
     const row = document.createElement('div');
     row.className = 'shoprow';
@@ -651,21 +661,37 @@ function renderShop(d) {
     box.appendChild(row);
   });
 
-  // trvalá vylepšení
+  // trvalá vylepšení (záložky podle kategorie)
+  const ups = d.up || [];
+  const totalLv = ups.reduce((a, u) => a + u.max, 0), haveLv = ups.reduce((a, u) => a + u.lvl, 0);
+  $('upTotal').textContent = '(' + haveLv + ' / ' + totalLv + ' úrovní, platí do konce hry)';
+  const tabs = $('shopUpTabs');
+  tabs.innerHTML = '';
+  UP_CATS.forEach((c) => {
+    const list = ups.filter((u) => u.cat === c.id);
+    const have = list.reduce((a, u) => a + u.lvl, 0), tot = list.reduce((a, u) => a + u.max, 0);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'uptab' + (shopTab === c.id ? ' active' : '');
+    b.textContent = c.icon + ' ' + c.n + ' ' + have + '/' + tot;
+    b.onclick = () => { shopTab = c.id; if (shopData) renderShop(shopData); };
+    tabs.appendChild(b);
+  });
   const ub = $('shopUp');
   ub.innerHTML = '';
-  (d.up || []).forEach((u) => {
+  ups.filter((u) => u.cat === shopTab).forEach((u) => {
     const row = document.createElement('div');
-    row.className = 'shoprow upg';
+    row.className = 'shoprow upg' + (u.locked ? ' locked' : '');
     const nm = document.createElement('span');
     nm.className = 'sname';
     const t1 = document.createElement('b'); t1.textContent = u.icon + ' ' + u.name + '  ' + '●'.repeat(u.lvl) + '○'.repeat(u.max - u.lvl);
-    const t2 = document.createElement('small'); t2.textContent = u.desc;
+    const t2 = document.createElement('small'); t2.textContent = u.locked ? '🔒 Odemkne se ve dni ' + u.minDay + ' · ' + u.desc : u.desc;
     nm.append(t1, t2);
     row.appendChild(nm);
     const b = document.createElement('button');
     b.className = 'btn small';
     if (u.next === null) { b.textContent = 'MAX'; b.disabled = true; }
+    else if (u.locked) { b.textContent = '🔒 den ' + u.minDay; b.disabled = true; }
     else { b.textContent = u.next + ' Kč'; b.disabled = u.next > d.money; b.onclick = () => { Sound.init(); socket.emit('upgrade', { id: u.id }); }; }
     row.appendChild(b);
     ub.appendChild(row);
@@ -839,7 +865,7 @@ function handleEvents(list) {
       case 'drop': Sound.play('drop'); if (e.m) float(e.x, 1.4, e.y, e.m, '#8dff9f'); break;
       case 'fire': Sound.play('fire'); float(e.x, 1.6, e.y, '🔥 Hoří!', '#ffb347'); break;
       case 'extinguish': Sound.play('extinguish'); float(e.x, 1.6, e.y, '✔ Uhašeno!', '#8dff9f'); break;
-      case 'splat': Sound.play('splat'); float(e.x, 0.6, e.y, '🐀 +' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
+      case 'splat': Sound.play('splat'); float(e.x, 0.6, e.y, e.cat ? '🐈 Kočka chytila krysu!' : '🐀 +' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
       case 'ratsteal': Sound.play('ratsteal'); if (e.m) float(e.x, 1.5, e.y, '🐀 ' + e.m, '#ff9a90'); break;
       case 'chaos': Sound.play('chaos'); break;
       case 'order': Sound.play('order'); break;
@@ -2587,7 +2613,7 @@ function updateOverlays() {
       const d = snap.s[t.x + ',' + t.y];
       if (!d || d.n === undefined) { t.el.classList.add('hidden'); continue; }
       const n = d.n;
-      const label = t.kind === 'rack' ? (n < 0 ? '📦 ∞' : '📦 ×' + n) : n + '/15';
+      const label = t.kind === 'rack' ? (n < 0 ? '📦 ∞' : '📦 ×' + n) : n + '/' + (snap.cap || 15);
       if (label !== t.last) { t.last = label; t.el.textContent = label; t.el.classList.toggle('zero', n === 0); }
       t.el.classList.remove('hidden');
       place(t.el, t.x + 0.5, t.kind === 'rack' ? 2.4 : TOP + 1.05, t.y + 0.5);
@@ -2634,7 +2660,7 @@ function update(dt) {
   if (me) {
     me.fx = v.fx; me.fy = v.fy;
     const ah = actors.get(myId);
-    const bm = ah && ah.h && ah.h.t === 'b' ? 0.75 : 1;           // s krabicí se jde pomaleji
+    const bm = ah && ah.h && ah.h.t === 'b' ? boxSpeed : 1;           // s krabicí se jde pomaleji
     if (playing && walking) moveBy(me, v.dx * SPEED * speedMult * bm * dt, v.dy * SPEED * speedMult * bm * dt);
   }
   for (const a of actors.values()) {

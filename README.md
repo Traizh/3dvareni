@@ -68,3 +68,6 @@ Za výdejním pultem je celá jídelna: stoly, židle, okna, vchod a hosté. S k
 - Statická geometrie (kuchyně, sklad, jídelna) se při startu slučuje do několika velkých meshů podle materiálu a oblasti – řádově méně draw callů.
 - Kvalita grafiky se **automaticky snižuje**, když FPS klesne pod ~38 (Vysoká → Střední → Nízká: menší rozlišení, menší/žádné stíny). Tlačítko 🎞 vpravo nahoře v hře ji přepíná ručně a pamatuje si volbu.
 - Popisky a stav stanic se přepočítávají jen tehdy, když je to potřeba (ne každý snímek).
+
+## Vylepšení ve Dnech
+23 trvalých vylepšení v 5 záložkách (Kuchyň, Obsluha, Sklad, Bezpečnost, Provoz), dohromady 86 úrovní s rostoucí cenou. Část se odemyká až v pozdějších dnech (např. sprinklery ve dni 4, reklama ve dni 5), takže se nedají vykoupit hned. Nově mj.: silnější plotna, rychlé kohoutky a myčka, vozík na krabice, spropitné, větší police / krabice / sklad, dohoda s dodavatelem, sprinklery, kuchyňská kočka (chytá krysy), pojištění, pohodlné židle, VIP klub, delší otevírací doba a reklama. Ceny a efekty jsou v tabulce `UPGRADES` na začátku `server.js`.

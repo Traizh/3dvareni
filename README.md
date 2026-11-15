@@ -63,3 +63,8 @@ Za výdejním pultem je celá jídelna: stoly, židle, okna, vchod a hosté. S k
 - **Dny:** v obchodě už nekupuješ jednotlivé kusy, ale **krabice** (10 ks, levnější než po kuse). Sklad pojme max. 8 krabic od druhu, regály ukazují, kolik jich zbývá.
 - **Ukládání:** ve Dnech si každá restaurace pamatuje svou kuchyni – věci na pultech, zásoby na policích, čisté i špinavé talíře. Přes noc se uklidí jen oheň, krysy a spálené jídlo.
 - **Rozložení:** burger bar zůstal, sushi bar má police na levé zdi, ostrov uprostřed a rýžovary u horní zdi, pizzerie má police dole, dva ostrůvky s prkénky a pece u baru s pitím.
+
+## Výkon
+- Statická geometrie (kuchyně, sklad, jídelna) se při startu slučuje do několika velkých meshů podle materiálu a oblasti – řádově méně draw callů.
+- Kvalita grafiky se **automaticky snižuje**, když FPS klesne pod ~38 (Vysoká → Střední → Nízká: menší rozlišení, menší/žádné stíny). Tlačítko 🎞 vpravo nahoře v hře ji přepíná ručně a pamatuje si volbu.
+- Popisky a stav stanic se přepočítávají jen tehdy, když je to potřeba (ne každý snímek).

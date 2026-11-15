@@ -245,7 +245,7 @@ canvas#game { position: absolute; inset: 0; display: block; width: 100%; height:
 @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
 
 /* ---------- Popisky ve 3D světě ---------- */
-.bar, .tag, .nametag, .float { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform; }
+.bar, .tag, .nametag, .float { position: absolute; left: 0; top: 0; white-space: nowrap; }
 .bar { width: 54px; height: 9px; border-radius: 5px; background: rgba(0,0,0,.78); padding: 1px; }
 .bar i { display: block; height: 100%; border-radius: 4px; }
 .bar span { position: absolute; left: 50%; top: -16px; transform: translateX(-50%); font-size: 0.7rem; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }

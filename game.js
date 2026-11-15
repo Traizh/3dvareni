@@ -791,6 +791,7 @@ const targetTile = (o) => [Math.floor(o.x + o.fx * REACH), Math.floor(o.y + o.fy
 socket.on('state', (s) => {
   if (!map) return;
   snap = s;
+  stationsDirty = true;
   const seen = new Set();
   for (const p of s.pl) {
     seen.add(p.id);
@@ -850,10 +851,10 @@ function handleEvents(list) {
 /* =====================================================================
  *  3D scéna
  * ===================================================================== */
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: (window.devicePixelRatio || 1) < 1.5, powerPreference: 'high-performance' });
 renderer.setClearColor(0x120a06);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x120a06, 50, 95);
@@ -877,16 +878,58 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(14, 16, 9);
 sun.target.position.set(17, 0, 6);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -21, right: 21, top: 13, bottom: -13, near: 1, far: 50 });
 sun.shadow.bias = -0.0006;
 scene.add(sun, sun.target);
+
+/* ---------- kvalita grafiky (automaticky se snižuje, když klesne FPS) ---------- */
+const QUALITY = [
+  { name: 'Vysoká', dpr: 1.5, shadow: true, map: 1024 },
+  { name: 'Střední', dpr: 1, shadow: true, map: 512 },
+  { name: 'Nízká', dpr: 0.75, shadow: false, map: 512 },
+];
+let qLevel = 0, qAuto = true;
+try {
+  const sv = localStorage.getItem('kuchyne-quality');
+  if (sv === '0' || sv === '1' || sv === '2') { qLevel = Number(sv); qAuto = false; }
+} catch (e) { /* nic */ }
+function applyQuality() {
+  const q = QUALITY[qLevel];
+  renderer.shadowMap.enabled = q.shadow;
+  sun.castShadow = q.shadow;
+  if (q.shadow) {
+    sun.shadow.mapSize.set(q.map, q.map);
+    if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  for (const k in matCache) matCache[k].needsUpdate = true;
+  scene.traverse((o) => { if (o.material && o.material.isMeshLambertMaterial) o.material.needsUpdate = true; });
+  if (view === 'game' || view === 'end' || view === 'shop') resize();
+  const b = $('qualBtn');
+  if (b) b.title = 'Grafika: ' + (qAuto ? 'auto, ' : '') + q.name;
+}
+const perf = { t: 0, n: 0, skip: 3 };
+function perfTick(rawDt) {
+  if (!qAuto || qLevel >= QUALITY.length - 1) return;
+  if (perf.skip > 0) { perf.skip -= rawDt; return; }
+  perf.t += rawDt; perf.n++;
+  if (perf.t >= 2.5) {
+    const fps = perf.n / perf.t;
+    perf.t = 0; perf.n = 0;
+    if (fps < 38) {
+      qLevel++;
+      applyQuality();
+      perf.skip = 2;
+      toast('Grafika snížena pro plynulost (' + QUALITY[qLevel].name + ')');
+    }
+  }
+}
 
 function resize() {
   const wrap = $('gameWrap');
   const w = Math.max(320, wrap.clientWidth || window.innerWidth);
   const h = Math.max(240, wrap.clientHeight || window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, QUALITY[qLevel].dpr));
   renderer.setSize(w, h, false);
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
@@ -913,7 +956,66 @@ function M(g, color, x, y, z, parent, o) {
   if (parent) parent.add(m);
   return m;
 }
-function clearGroup(g) { while (g.children.length) g.remove(g.children[0]); }
+function clearGroup(g) {
+  while (g.children.length) {
+    const c = g.children[0];
+    g.remove(c);
+    if (c.userData && c.userData.merged && c.geometry) c.geometry.dispose();
+  }
+}
+
+// Sloučí statické meshe (stejný materiál) do několika velkých → desítky místo tisíců draw callů.
+// Skupiny s userData.dynamic se přeskočí. Při regions=true se slučuje zvlášť kuchyně / sklad / jídelna.
+function mergeStatic(root, regions) {
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const rel = new THREE.Matrix4();
+  const nm = new THREE.Matrix3();
+  const v = new THREE.Vector3();
+  const buckets = new Map();
+  const removed = [];
+  const visit = (o) => {
+    for (const c of [...o.children]) {
+      if (c.userData && c.userData.dynamic) continue;
+      const g = c.geometry;
+      if (c.isMesh && g && g.attributes && g.attributes.position && g.attributes.normal && g.attributes.uv && !Array.isArray(c.material)) {
+        const e = c.matrixWorld.elements;
+        const region = regions ? (e[12] > 16.4 ? 'D' : e[14] > 10 ? 'W' : 'K') : '';
+        const key = c.material.uuid + '|' + (c.castShadow ? 1 : 0) + (c.receiveShadow ? 1 : 0) + region;
+        let b = buckets.get(key);
+        if (!b) { b = { mat: c.material, cast: c.castShadow, recv: c.receiveShadow, pos: [], nor: [], uv: [], idx: [], n: 0 }; buckets.set(key, b); }
+        rel.multiplyMatrices(inv, c.matrixWorld);
+        nm.getNormalMatrix(rel);
+        const pa = g.attributes.position, na = g.attributes.normal, ua = g.attributes.uv;
+        for (let i = 0; i < pa.count; i++) {
+          v.fromBufferAttribute(pa, i).applyMatrix4(rel); b.pos.push(v.x, v.y, v.z);
+          v.fromBufferAttribute(na, i).applyMatrix3(nm).normalize(); b.nor.push(v.x, v.y, v.z);
+          b.uv.push(ua.getX(i), ua.getY(i));
+        }
+        if (g.index) for (let i = 0; i < g.index.count; i++) b.idx.push(g.index.getX(i) + b.n);
+        else for (let i = 0; i < pa.count; i++) b.idx.push(i + b.n);
+        b.n += pa.count;
+        removed.push(c);
+      } else if (c.children && c.children.length) visit(c);
+    }
+  };
+  visit(root);
+  removed.forEach((m) => {
+    if (m.parent) m.parent.remove(m);
+    if (m.userData && m.userData.merged && m.geometry) m.geometry.dispose();
+  });
+  buckets.forEach((b) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
+    g.setIndex(b.idx);
+    const m = new THREE.Mesh(g, b.mat);
+    m.castShadow = b.cast; m.receiveShadow = b.recv;
+    m.userData.merged = true;
+    root.add(m);
+  });
+}
 
 function labelSprite(text, color, w) {
   const c = document.createElement('canvas');
@@ -1178,11 +1280,13 @@ function iconTex(k) {
   x.fillText(ICONS[k] || '?', 32, 36);
   return (iconTexCache[k] = new THREE.CanvasTexture(cv));
 }
+const iconMatCache = {};
+const iconMat = (k) => iconMatCache[k] || (iconMatCache[k] = new THREE.MeshBasicMaterial({ map: iconTex(k) }));
 function makeBoxModel(k) {
   const g = new THREE.Group();
   M(geo('Box', 0.44, 0.34, 0.4), '#b98b4f', 0, 0.17, 0, g);
   M(geo('Box', 0.46, 0.03, 0.1), '#d9b87a', 0, 0.345, 0, g, { noShadow: true });
-  const lbl = new THREE.Mesh(geo('Plane', 0.22, 0.22), new THREE.MeshBasicMaterial({ map: iconTex(k) }));
+  const lbl = new THREE.Mesh(geo('Plane', 0.22, 0.22), iconMat(k));
   lbl.position.set(0, 0.17, 0.205);
   g.add(lbl);
   return g;
@@ -1221,7 +1325,10 @@ function counter(parent, x, z, topColor) {
 }
 
 function buildKitchen() {
-  if (kitchen) scene.remove(kitchen);
+  if (kitchen) {
+    kitchen.traverse((o) => { if (o.userData && o.userData.merged && o.geometry) o.geometry.dispose(); });
+    scene.remove(kitchen);
+  }
   world.innerHTML = '';
   barEls = []; textEls = []; dyn = {};
   fireObjs.clear(); ratObjs.clear();
@@ -1416,6 +1523,7 @@ function buildKitchen() {
   for (const key in dyn) {
     const d = dyn[key];
     d.g = new THREE.Group();
+    d.g.userData.dynamic = true;
     d.g.position.set(d.x + 0.5, d.ch === 'R' ? 0 : TOP, d.y + 0.5);
     d.sig = null;
     kitchen.add(d.g);
@@ -1431,7 +1539,11 @@ function buildKitchen() {
   he.rotation.x = -Math.PI / 2;
   hilite.add(hp, he);
   hilite.visible = false;
+  hilite.userData.dynamic = true;
   kitchen.add(hilite);
+  mergeStatic(kitchen, true);
+  perf.skip = 3; perf.t = 0; perf.n = 0;
+  stationsDirty = true;
 }
 
 function addBar(x, y, ch) {
@@ -1443,10 +1555,14 @@ function addText(x, y, kind, k) {
 }
 
 /* ---------- dynamické předměty na stanicích ---------- */
+let stationsDirty = true;
 function updateStations(tm) {
   if (!snap) return;
+  const fresh = stationsDirty;
+  stationsDirty = false;
   for (const key in dyn) {
     const d = dyn[key], s = snap.s[key];
+    if (!fresh) { if (d.ch === 'F') animateStove(d, tm); continue; }
     let sig = '';
     if (d.ch === 'C' || d.ch === 'K' || d.ch === 'F') sig = s && s.i ? JSON.stringify(s.i) : '';
     else if (d.ch === 'D') sig = String(Math.min(snap.d, 8));
@@ -1460,6 +1576,11 @@ function updateStations(tm) {
 }
 
 function rebuildStation(d, s) {
+  rebuildStationInner(d, s);
+  if (d.ch !== 'F' && d.g.children.length > 1) mergeStatic(d.g);
+}
+
+function rebuildStationInner(d, s) {
   clearGroup(d.g);
   d.flames = null; d.smoke = null;
   if (d.ch === 'C' || d.ch === 'K') {
@@ -1738,9 +1859,12 @@ function makePerson(o) {
     return a;
   };
   const armL = mkArm(-0.27), armR = mkArm(0.27);
+  armL.userData.dynamic = true; armR.userData.dynamic = true;
   const holder = new THREE.Group();
+  holder.userData.dynamic = true;
   holder.position.set(0, 0.7, 0.44);
   body.add(holder);
+  mergeStatic(body);
   const p = { g, body, legs, armL, armR, holder, seated: false, o };
   setSeated(p, false);
   return p;
@@ -1761,6 +1885,7 @@ function setSeated(p, seated) {
     [-0.1, 0.1].forEach((x) => M(geo('Cylinder', 0.08, 0.08, 0.22, 8), pants, x, 0.11, 0, p.legs));
     p.armL.rotation.x = 0; p.armR.rotation.x = 0;
   }
+  mergeStatic(p.legs);
 }
 function randomLook() { return { shirt: rnd(SHIRTS), skin: rnd(SKINS), hair: rnd(HAIRS), pants: rnd(['#33405a', '#4a3b2a', '#2d2d2d', '#5a4a6a']) }; }
 
@@ -1905,6 +2030,7 @@ function makeFloorTexture(tone) {
 
 function buildDining() {
   dining = new THREE.Group();
+  dining.userData.dynamic = true;
   kitchen.add(dining);
   customers = new Map(); waiters = []; jobs = []; ambients = [];
   slots = SLOT_Z.map(() => null);
@@ -1993,14 +2119,13 @@ function buildDining() {
     const n = { person, x: s.cx, z: s.cz, ang: s.face, tang: s.face, phase: Math.random() * 6, eating: true, path: [], speed: 0 };
     npcApply(n);
     person.g.position.y = 0;
-    dining.add(person.g);
+    [person.armL, person.armR, person.holder].forEach((a) => { a.userData.dynamic = false; });
+    K.add(person.g);
     const sign = s.cz > s.tz ? -1 : 1;
     const plate = makePlate(['bun', 'meat'], false);
     plate.scale.setScalar(0.5);
     plate.position.set(s.tx + (Math.random() - 0.5) * 0.2, 0.78, s.tz + (s.cz > s.tz ? 0.3 : -0.3));
-    dining.add(plate);
-    n.t0 = Math.random() * 10; n.sign = sign;
-    ambients.push(n);
+    K.add(plate);
   });
   [[17.5, 0.8], [34.0, 0.8], [34.0, 9.2], [17.5, 9.2]].forEach((q) => K.add(makePlant(q[0], q[1])));
 
@@ -2225,8 +2350,10 @@ function makeChef(lk, fallback) {
   M(geo('Box', 0.07, 0.07, 0.34), shirt, -0.2, 0.62, 0.2, body);
   M(geo('Box', 0.07, 0.07, 0.34), shirt, 0.2, 0.62, 0.2, body);
   const holder = new THREE.Group();
+  holder.userData.dynamic = true;
   holder.position.set(0, 0.7, 0.46);
   body.add(holder);
+  mergeStatic(body);
   return { g, body, holder, heldSig: '', tag: mkEl('nametag'), color };
 }
 
@@ -2550,11 +2677,15 @@ function updateHighlight() {
 }
 
 let lastFrame = performance.now();
+let frameNo = 0;
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.max(0, Math.min(0.05, (now - lastFrame) / 1000));
+  const rawDt = Math.max(0, (now - lastFrame) / 1000);
+  const dt = Math.min(0.05, rawDt);
   lastFrame = now;
   if ((view !== 'game' && view !== 'end' && view !== 'shop') || !map || !snap || !kitchen) return;
+  perfTick(Math.min(0.25, rawDt));
+  frameNo++;
   update(dt);
   updateCamera(now / 1000);
   syncChefs(dt);
@@ -2566,11 +2697,19 @@ function frame(now) {
   updateLights(dt);
   updateHighlight();
   renderer.render(scene, camera);
-  updateOverlays();
+  if ((frameNo & 1) === 0) updateOverlays();          // popisky stačí aktualizovat každý druhý snímek
   updateFloaters(dt);
 }
 requestAnimationFrame(frame);
 
+$('qualBtn').onclick = () => {
+  qAuto = false;
+  qLevel = (qLevel + 1) % QUALITY.length;
+  try { localStorage.setItem('kuchyne-quality', String(qLevel)); } catch (e) { /* nic */ }
+  applyQuality();
+  toast('Grafika: ' + QUALITY[qLevel].name);
+};
+applyQuality();
 setView('menu');
 }   // start()
 })();

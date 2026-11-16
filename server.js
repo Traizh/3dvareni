@@ -22,6 +22,8 @@ const COUNTDOWN = 3;         // odpočet před startem (s)
 const MIN_PLAYERS = 1;       // lze hrát i sám
 const MAX_PLAYERS = 4;
 const SPEED = 4.6;           // dlaždic za sekundu
+const CMD_DT = 1 / 60;       // délka jednoho pohybového kroku (klient posílá příkazy po 1/60 s)
+const MAX_QUEUE = 40;        // nejvýš tolik nezpracovaných příkazů na hráče
 const HALF = 0.3;            // polovina velikosti hráče (kolize)
 const REACH = 0.75;          // dosah interakce před hráčem
 const CHOP_TIME = 2.4;       // s držení pro nakrájení
@@ -315,6 +317,7 @@ const tileAtR = (room, x, y) => (y < 0 || y >= H || x < 0 || x >= W ? '#' : room
 const isSolid = (x, y) => tileAt(x, y) !== '.';
 const r2 = (n) => Math.round(n * 100) / 100;
 const r1 = (n) => Math.round(n * 10) / 10;
+const r3 = (n) => Math.round(n * 1000) / 1000;
 
 const newIngredient = (k) => ({ t: 'i', k, s: 'raw' });
 const newPlate = () => ({ t: 'p', c: [] });
@@ -457,6 +460,7 @@ function addPlayer(room, socket, name, look) {
     id: socket.id, name, slot, color: COLORS[slot], look: null,
     x: SPAWNS[slot][0], y: SPAWNS[slot][1], fx: 0, fy: 1,
     held: null, input: { dx: 0, dy: 0, hold: false }, sfxT: 0,
+    cmd: false, queue: [], qseq: 0, ack: 0, budget: 0,   // pohyb řízený příkazy z klienta (viz runCmd)
   };
   p.look = cleanLook(look, slot);
   p.color = HAT_COLORS[p.look.h];
@@ -620,8 +624,10 @@ function beginRound(room) {
     p.x = SPAWNS[p.slot][0]; p.y = SPAWNS[p.slot][1];
     p.fx = 0; p.fy = 1; p.held = null;
     p.input = { dx: 0, dy: 0, hold: false }; p.sfxT = 0;
+    p.queue = []; p.qseq = 0; p.ack = 0; p.budget = 0;
   }
-  io.to(room.code).emit('gameStart', { map: room.map, recipes: recipesPublicOf(room.rest), rest: restPublic(room.rest), time: room.len, cd: COUNTDOWN, mode: room.mode, day: room.day,
+  room.gn = (room.gn || 0) + 1;        // číslo hry/dne: příkazy ze starého kola se ignorují
+  io.to(room.code).emit('gameStart', { gn: room.gn, map: room.map, recipes: recipesPublicOf(room.rest), rest: restPublic(room.rest), time: room.len, cd: COUNTDOWN, mode: room.mode, day: room.day,
     up: room.upgrades, today: room.today ? { id: room.today.id, n: room.today.n } : null, goal: room.goal });
   broadcastRoom(room);
 }
@@ -1299,6 +1305,38 @@ function updateOrders(room, dt) {
   }
 }
 
+// Rychlost chůze hráče (boty, krabice v ruce) – klient počítá úplně stejně
+const walkSpeed = (room, p) => SPEED * (1 + 0.06 * up(room, 'boots')) *
+  (isBox(p.held) ? Math.min(1, BOX_SPEED + 0.08 * up(room, 'cart')) : 1);
+
+/*
+ * Pohyb řízený příkazy: klient posílá posloupnost příkazů po 1/60 s
+ * (směr chůze, směr pohledu, držení, stisk interakce) s pořadovým číslem.
+ * Server je zpracuje ve stejném pořadí a stejnými kroky, jaké klient předpověděl,
+ * takže po zastavení nic „nedoklouzává“. Číslo posledního zpracovaného příkazu
+ * (ack) jde zpět ve snapshotu a klient podle něj opraví předpověď.
+ */
+function runCmd(room, p, c) {
+  p.fx = c.fx; p.fy = c.fy;
+  if (c.dx || c.dy) {
+    const k = walkSpeed(room, p) * CMD_DT;
+    moveBy(p, c.dx * k, c.dy * k);
+  }
+  p.input = { dx: c.dx, dy: c.dy, hold: c.h };
+  if (c.a) interact(room, p);
+  updateHold(room, p, CMD_DT);
+  p.ack = c.s;
+}
+
+function runCmds(room, p, dt) {
+  // rozpočet času: klient nemůže běžet rychleji než skutečný čas (max. malá rezerva na výkyvy sítě)
+  p.budget = Math.min(0.25, p.budget + dt);
+  while (p.queue.length && p.budget >= CMD_DT - 1e-9) {
+    p.budget -= CMD_DT;
+    runCmd(room, p, p.queue.shift());
+  }
+}
+
 function tickRoom(room, dt) {
   if (room.state !== 'playing') return;
   curMap = room.map;
@@ -1311,15 +1349,17 @@ function tickRoom(room, dt) {
 
   const list = [...room.players.values()];
   for (const p of list) {
+    if (p.cmd) { runCmds(room, p, dt); continue; }      // nový klient: pohyb podle příkazů
+    // starý klient (události „input“ / „press“): původní chování
     const { dx, dy } = p.input;
     if (dx || dy) {
       // analogový pohyb z pohledu první osoby (délka vektoru max. 1)
-      const k = SPEED * (1 + 0.06 * up(room, 'boots')) * (isBox(p.held) ? Math.min(1, BOX_SPEED + 0.08 * up(room, 'cart')) : 1) * dt / Math.max(1, Math.hypot(dx, dy));
+      const k = walkSpeed(room, p) * dt / Math.max(1, Math.hypot(dx, dy));
       moveBy(p, dx * k, dy * k);
     }
   }
   separate(list);
-  for (const p of list) updateHold(room, p, dt);
+  for (const p of list) if (!p.cmd) updateHold(room, p, dt);
   updateStoves(room, dt);
   updateFires(room, dt);
   updateRats(room, dt);
@@ -1357,7 +1397,7 @@ function snapshot(room) {
     cd: r1(room.cd),
     sc: room.mode === 'days' ? room.money : room.score,
     pl: [...room.players.values()].map((p) => ({
-      id: p.id, n: p.name, c: p.color, lk: p.look, x: r2(p.x), y: r2(p.y), fx: r2(p.fx), fy: r2(p.fy), h: p.held,
+      id: p.id, n: p.name, c: p.color, lk: p.look, x: p.x, y: p.y, fx: r2(p.fx), fy: r2(p.fy), h: p.held, ak: p.ack,   // přesná pozice: klient z ní přehrává kroky bit po bitu stejně
     })),
     s,
     o: room.orders.map((o) => ({ id: o.id, r: o.r, dr: o.dr, fd: o.fd, dd: o.dd, v: o.vip ? 1 : 0, t: r1(o.t), l: o.l })),
@@ -1513,7 +1553,35 @@ io.on('connection', (socket) => {
   socket.on('press', () => {
     const room = rooms.get(socket.data.code);
     const p = room && room.players.get(socket.id);
-    if (p && room.state === 'playing' && room.cd === 0) interact(room, p);
+    if (p && !p.cmd && room.state === 'playing' && room.cd === 0) interact(room, p);
+  });
+
+  // Dávka pohybových příkazů: { g: číslo hry, c: [[seq, dx, dy, fx, fy, příznaky], ...] }
+  // příznaky: 1 = držení interakce, 2 = stisk interakce v tomto kroku
+  socket.on('cmds', (d) => {
+    const room = rooms.get(socket.data.code);
+    const p = room && room.players.get(socket.id);
+    if (!p || !d || !Array.isArray(d.c) || room.state !== 'playing' || room.cd > 0 || d.g !== room.gn) return;
+    p.cmd = true;
+    const num = (n) => { n = Number(n); return isFinite(n) ? n : 0; };
+    for (const c of d.c.slice(0, MAX_QUEUE)) {
+      if (!Array.isArray(c)) continue;
+      const s = Math.floor(num(c[0]));
+      if (s <= p.qseq) continue;                          // duplicita nebo starý příkaz
+      p.qseq = s;
+      let dx = num(c[1]), dy = num(c[2]);
+      const l = Math.hypot(dx, dy);
+      if (l > 1) { dx /= l; dy /= l; }
+      let fx = num(c[3]), fy = num(c[4]);
+      const fl = Math.hypot(fx, fy);
+      if (fl > 0.01) { fx /= fl; fy /= fl; } else { fx = p.fx; fy = p.fy; }
+      const flags = Math.floor(num(c[5]));
+      p.queue.push({ s, dx, dy, fx, fy, h: !!(flags & 1), a: !!(flags & 2) });
+    }
+    if (p.queue.length > MAX_QUEUE) {                     // klient je příliš napřed – zahodíme nejstarší
+      const cut = p.queue.splice(0, p.queue.length - MAX_QUEUE);
+      p.ack = cut[cut.length - 1].s;
+    }
   });
 
   socket.on('leave', () => removePlayer(socket));

@@ -214,6 +214,22 @@ let shopData = null;
 let speedMult = 1;
 let boxSpeed = 0.75;                       // vylepšení bot
 
+/* Pohyb řízený příkazy (viz server.js, runCmd): klient simuluje pevné kroky 1/60 s,
+ * každý krok pošle serveru jako příkaz s pořadovým číslem a drží si ho v `pending`,
+ * dokud ho server nepotvrdí (ack). Podle potvrzené pozice se pak předpověď přepočítá,
+ * takže po zastavení nic nedoklouzává a nic se neteleportuje. */
+const STEP = 1 / 60;
+const INTERP = 0.1;                        // zpoždění vykreslování ostatních hráčů (s) – plynulá interpolace
+let gn = null;                             // číslo hry ze serveru; null = starý server (použije se původní vstup)
+let cmdSeq = 0, acc = 0, actPending = false;
+let pending = [];                          // odeslané, ale ještě nepotvrzené kroky
+let outbox = [];                           // kroky čekající na odeslání
+let lastFlush = 0;
+let visX = 0, visY = 0;                    // vizuální odchylka po opravě předpovědi (plynule mizí)
+let prevX = 0, prevY = 0, alpha = 0;       // pozice před posledním krokem a podíl rozpracovaného kroku – plynulé vykreslování mezi kroky (120/144 Hz monitory)
+const dispX = () => prevX + (me.x - prevX) * alpha + visX;    // zobrazená pozice vlastního kuchaře
+const dispY = () => prevY + (me.y - prevY) * alpha + visY;
+
 /* ---------------------------------------------------------------------
  *  Socket + stav připojení
  * ------------------------------------------------------------------- */
@@ -487,6 +503,8 @@ socket.on('gameStart', (d) => {
   snap = null; me = null; floaters.forEach((f) => f.el.remove()); floaters = [];
   clearActors();
   lastCd = null; lastTick = null;
+  gn = d.gn !== undefined ? d.gn : null;
+  cmdSeq = 0; acc = 0; actPending = false; pending = []; outbox = []; visX = 0; visY = 0;
   buildKitchen();
   resetKeys();
   $('countdown').classList.add('hidden');
@@ -738,6 +756,7 @@ function currentInput() {
 const r3 = (n) => Math.round(n * 1000) / 1000;
 
 function sendInput(force) {
+  if (gn !== null) return;                 // nový režim: vstup jde v příkazech (viz update)
   const v = currentInput(), h = holdNow();
   const changed = Math.abs(v.dx - lastSent.dx) > 0.001 || Math.abs(v.dy - lastSent.dy) > 0.001 ||
     Math.abs(v.fx - lastSent.fx) > 0.01 || Math.abs(v.fy - lastSent.fy) > 0.01 || h !== lastSent.hold;
@@ -749,10 +768,13 @@ function sendInput(force) {
   socket.emit('input', lastSent);
 }
 function resetKeys() {
-  keys.clear(); turnKeys.clear(); holdKey = false; holdMouse = false;
+  keys.clear(); turnKeys.clear(); holdKey = false; holdMouse = false; actPending = false;
   sendInput(true);
 }
-function press() { sendInput(true); socket.emit('press'); }
+function press() {
+  if (gn !== null) { actPending = true; return; }     // stisk jde v dalším příkazu, ve správném pořadí s pohybem
+  sendInput(true); socket.emit('press');
+}
 
 window.addEventListener('keydown', (e) => {
   if (view !== 'game') return;
@@ -822,9 +844,16 @@ socket.on('state', (s) => {
   for (const p of s.pl) {
     seen.add(p.id);
     let a = actors.get(p.id);
-    if (!a) { a = { id: p.id, x: p.x, y: p.y, phase: 0, moving: false, ang: Math.atan2(p.fx, p.fy) }; actors.set(p.id, a); }
+    if (!a) { a = { id: p.id, x: p.x, y: p.y, phase: 0, moving: false, ang: Math.atan2(p.fx, p.fy), buf: [] }; actors.set(p.id, a); }
     a.n = p.n; a.c = p.c; a.lk = p.lk; a.tx = p.x; a.ty = p.y; a.fx = p.fx; a.fy = p.fy; a.h = p.h;
-    if (p.id === myId) reconcile(p);
+    if (p.id === myId) { if (gn !== null) reconcileCmd(p); else reconcile(p); }
+    else {
+      // ostatní hráči: ukládáme polohy s časem a vykreslujeme je o INTERP zpět (viz updateRemote)
+      const last = a.buf[a.buf.length - 1], t = performance.now() / 1000;
+      if (last && Math.hypot(p.x - last.x, p.y - last.y) > 2.5) a.buf.length = 0;   // teleport (nový start) – bez klouzání
+      a.buf.push({ t, x: p.x, y: p.y });
+      if (a.buf.length > 12) a.buf.shift();
+    }
   }
   for (const id of [...actors.keys()]) if (!seen.has(id)) removeActor(id);
 
@@ -839,6 +868,29 @@ socket.on('state', (s) => {
   }
   updateHud();
 });
+
+// Pevný pohybový krok – musí být shodný se serverem (runCmd): stejná rychlost, stejné kolize
+function stepMove(o, c) {
+  if (c.dx || c.dy) {
+    const k = SPEED * c.sm * c.bm * STEP;              // stejné pořadí násobení jako na serveru (walkSpeed * CMD_DT)
+    moveBy(o, c.dx * k, c.dy * k);
+  }
+}
+
+// Oprava předpovědi podle potvrzené pozice ze serveru:
+// vezmeme pozici po posledním potvrzeném kroku a znovu přehrajeme kroky, které server ještě nezpracoval.
+function reconcileCmd(p) {
+  if (!me) { me = { x: p.x, y: p.y, fx: p.fx, fy: p.fy }; yaw = Math.atan2(p.fx, p.fy); visX = 0; visY = 0; prevX = p.x; prevY = p.y; alpha = 0; return; }
+  if (snap.cd > 0) { me.x = p.x; me.y = p.y; pending = []; outbox = []; visX = 0; visY = 0; prevX = p.x; prevY = p.y; alpha = 0; return; }
+  const ak = p.ak | 0;
+  while (pending.length && pending[0].s <= ak) pending.shift();
+  const st = { x: p.x, y: p.y };
+  for (const c of pending) stepMove(st, c);
+  const ex = me.x - st.x, ey = me.y - st.y;            // o kolik se oprava liší od toho, co jsme ukazovali
+  if (Math.hypot(ex, ey) > 2.5) { visX = 0; visY = 0; prevX = st.x; prevY = st.y; alpha = 0; }   // velký skok (např. nový start) – bez vyhlazování
+  else { visX += ex; visY += ey; prevX -= ex; prevY -= ey; }   // malý rozdíl se vizuálně rozplyne za zlomek sekundy (zobrazená pozice se nezmění)
+  me.x = st.x; me.y = st.y;
+}
 
 function reconcile(p) {
   if (!me) { me = { x: p.x, y: p.y, fx: p.fx, fy: p.fy }; yaw = Math.atan2(p.fx, p.fy); return; }
@@ -2661,27 +2713,77 @@ function update(dt) {
     me.fx = v.fx; me.fy = v.fy;
     const ah = actors.get(myId);
     const bm = ah && ah.h && ah.h.t === 'b' ? boxSpeed : 1;           // s krabicí se jde pomaleji
-    if (playing && walking) moveBy(me, v.dx * SPEED * speedMult * bm * dt, v.dy * SPEED * speedMult * bm * dt);
+    if (gn !== null) {
+      if (playing) {
+        // pevné kroky 1/60 s: každý krok se hned provede lokálně a odejde serveru jako příkaz
+        acc = Math.min(acc + dt, 0.1);
+        while (acc >= STEP) {
+          acc -= STEP;
+          let dx = r4(v.dx), dy = r4(v.dy);
+          const l = Math.hypot(dx, dy);
+          if (l > 1) { dx = dx / l * 0.999999; dy = dy / l * 0.999999; }   // přesně pod 1, aby je server už neupravoval
+          const c = { s: ++cmdSeq, dx, dy, fx: r4(v.fx), fy: r4(v.fy), h: holdNow(), a: actPending, sm: speedMult, bm };
+          actPending = false;
+          prevX = me.x; prevY = me.y;                      // pozice před krokem – pro plynulé vykreslení mezi kroky
+          stepMove(me, c);
+          pending.push(c);
+          if (pending.length > 240) pending.shift();
+          outbox.push([c.s, c.dx, c.dy, c.fx, c.fy, (c.h ? 1 : 0) | (c.a ? 2 : 0)]);
+        }
+        alpha = acc / STEP;                                // jak daleko jsme v rozpracovaném kroku (0..1)
+        flushCmds(false);
+      } else { acc = 0; alpha = 0; prevX = me.x; prevY = me.y; }
+    } else {
+      if (playing && walking) moveBy(me, v.dx * SPEED * speedMult * bm * dt, v.dy * SPEED * speedMult * bm * dt);   // starý server
+      prevX = me.x; prevY = me.y; alpha = 0;
+    }
+    const dk = Math.exp(-dt * 14);                                     // vizuální korekce plynule doznívá
+    visX *= dk; visY *= dk;
   }
   for (const a of actors.values()) {
     if (a.id === myId && me) {
-      a.x = me.x; a.y = me.y; a.fx = me.fx; a.fy = me.fy;
+      a.x = dispX(); a.y = dispY(); a.fx = me.fx; a.fy = me.fy;
       a.moving = !!(playing && walking);
-    } else {
-      const k = Math.min(1, dt * 14), ox = a.x, oy = a.y;
-      a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k;
-      a.moving = dt > 0 && Math.hypot(a.x - ox, a.y - oy) / dt > 0.5;
-    }
+    } else updateRemote(a);
     if (a.moving) a.phase += dt * 14;
   }
   sendInput(false);
+}
+
+const r4 = (n) => Math.round(n * 10000) / 10000;
+
+// Odeslání nasbíraných kroků serveru (po dávkách, aby se nezahlcovala síť)
+function flushCmds(force) {
+  if (!outbox.length) return;
+  const now = performance.now();
+  if (!force && now - lastFlush < 30 && !outbox.some((c) => c[5] & 2)) return;   // stisk interakce jde hned
+  lastFlush = now;
+  while (outbox.length) socket.emit('cmds', { g: gn, c: outbox.splice(0, 30) });
+}
+
+// Ostatní hráči: plynulá interpolace mezi snapshoty (bez dotahování, takže po zastavení nic nekloužou)
+function updateRemote(a) {
+  const b = a.buf;
+  if (!b || !b.length) { a.moving = false; return; }
+  const rt = performance.now() / 1000 - INTERP;
+  while (b.length > 2 && b[1].t <= rt) b.shift();
+  let x = b[0].x, y = b[0].y, spd = 0;
+  if (b.length > 1 && rt > b[0].t) {
+    const s = b[1], span = Math.max(1e-3, s.t - b[0].t);
+    const k = Math.min(1, (rt - b[0].t) / span);
+    x = b[0].x + (s.x - b[0].x) * k;
+    y = b[0].y + (s.y - b[0].y) * k;
+    if (rt < s.t) spd = Math.hypot(s.x - b[0].x, s.y - b[0].y) / span;
+  }
+  a.x = x; a.y = y;
+  a.moving = spd > 0.4;
 }
 
 function updateCamera(tm) {
   if (!me) return;
   const a = actors.get(myId);
   const bob = a && a.moving ? Math.sin(a.phase) * 0.035 : 0;
-  camera.position.set(me.x, EYE + bob, me.y);
+  camera.position.set(dispX(), EYE + bob, dispY());
   camera.rotation.set(pitch, yaw + Math.PI, 0);
 }
 

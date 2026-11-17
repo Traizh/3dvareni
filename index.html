@@ -48,6 +48,15 @@
       <button id="createBtn" class="btn primary" disabled>Vytvořit novou místnost</button>
     </div>
     <button id="soloBtn" class="btn solo" disabled>🧑‍🍳 Hrát sám</button>
+
+    <div class="resume">
+      <b>💾 Pokračovat ve Dnech</b>
+      <button id="resumeLast" class="btn small hidden" disabled>▶ Pokračovat</button>
+      <div class="row">
+        <input id="resumeCode" type="text" placeholder="Vlož kód uložení z obchodu…" autocomplete="off">
+        <button id="resumeBtn" class="btn small" disabled>Načíst</button>
+      </div>
+    </div>
     <p id="menuError" class="error"></p>
 
     <div class="help">
@@ -95,7 +104,7 @@
       <div id="topbar">
         <div id="timer">⏱ 3:00</div>
         <div id="roomLbl">MÍSTNOST</div>
-        <div id="score">Skóre 0</div>
+        <div id="rightbox"><div id="rep" class="hidden" title="Reputace restaurace"></div><div id="score">Skóre 0</div></div>
       </div>
       <div id="orders" class="empty"></div>
       <div id="world"></div>
@@ -141,11 +150,15 @@
       <div id="shopNext"></div>
       <h2 class="shophead">🏪 Restaurace <small>(kup další a zvol, kterou otevřeš)</small></h2>
       <div id="shopRests"></div>
+      <h2 class="shophead">👥 Zaměstnanci <small id="staffInfo"></small></h2>
+      <div id="shopStaff"></div>
       <h2 class="shophead">📦 Krabice se zásobami <small>(1 krabice = 10 ks; do kuchyně je odneseš ze skladu)</small></h2>
       <div id="shopItems"></div>
       <h2 class="shophead">🔧 Vylepšení <small id="upTotal"></small></h2>
       <div id="shopUpTabs" class="uptabs"></div>
       <div id="shopUp"></div>
+      <h2 class="shophead">💾 Uložení hry <small>(kód pro pokračování později; ukládá se i v tomto prohlížeči)</small></h2>
+      <div class="saverow"><input id="saveCode" type="text" readonly placeholder="Kód se objeví po konci dne…"><button id="saveCopy" class="btn small">Kopírovat</button></div>
       <p id="shopReady" class="hint"></p>
       <div class="row"><button id="readyBtn" class="btn primary">Připraven</button></div>
       <button id="shopLeave" class="btn small">Odejít</button>

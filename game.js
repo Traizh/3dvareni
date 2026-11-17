@@ -95,6 +95,10 @@ const THEMES = {
   sushi: { kwall: '#5f8179', wall: '#f1e8d6', wains: '#2b2623', cloth: ['#2b2b2b', '#b71c1c'], lamp: '#c62828', carpet: ['#1d1d1d', '#3a3a3a'], floor: [165, 150, 95], menu: 'SUSHI MENU', sign: 'IRASSHAI', stove: 'cooker', ceil: '#e9e2cf', win: '#d4ecff', curtain: '#b71c1c' },
   pizza: { kwall: '#9c4e38', wall: '#c8694a', wains: '#4a2f18', cloth: ['#d32f2f', '#ffffff'], lamp: '#2e7d32', carpet: ['#2e7d32', '#4caf50'], floor: [190, 100, 66], menu: 'PIZZA MENU', sign: 'BENVENUTI', stove: 'oven', ceil: '#ead7bd', win: '#bfe4ff', curtain: '#2e7d32' },
 };
+const TYPE_ICON = { normal: '', picky: '🤨', impatient: '😤', regular: '🧓', critic: '🧐' };
+const TYPE_NAME = { normal: 'Běžný host', picky: 'Vybíravý host (něco nechce)', impatient: 'Spěchá! (platí víc)', regular: 'Štamgast (trpělivý, spropitné)', critic: 'Kritik (platí 2×, ovlivní reputaci)' };
+const TYPE_LOOK = { picky: { shirt: '#ab47bc' }, impatient: { shirt: '#ff7043' }, regular: { shirt: '#8d6e63' }, critic: { shirt: '#212121', hair: '#d9d9d9', pants: '#111111' } };
+const HELPER_LOOK = { dish: { shirt: '#4fc3f7', name: 'Myč' }, cook: { shirt: '#ffffff', name: 'Kuchař' }, stock: { shirt: '#ffb74d', name: 'Skladník' } };
 let restId = 'burger';
 let theme = THEMES.burger;
 
@@ -244,6 +248,8 @@ function setNet(kind, text) {
   $('createBtn').disabled = !connected;
   $('joinBtn').disabled = !connected;
   $('soloBtn').disabled = !connected;
+  $('resumeBtn').disabled = !connected;
+  $('resumeLast').disabled = !connected;
 }
 setNet('wait', '⏳ Připojuji k serveru… (první start na Renderu může trvat až minutu)');
 socket.on('connect', () => { connected = true; setNet('ok', '✅ Připojeno k serveru'); });
@@ -586,19 +592,59 @@ socket.on('shop', (d) => {
   renderShop(d);
 });
 
+/* ---------- Uložení a pokračování ---------- */
+let lastSave = null;
+function loadStoredSave() {
+  try { const v = JSON.parse(localStorage.getItem('kuchyne-save') || 'null'); return v && typeof v.code === 'string' ? v : null; } catch (e) { return null; }
+}
+socket.on('save', (d) => {
+  lastSave = d;
+  try { localStorage.setItem('kuchyne-save', JSON.stringify({ code: d.code, day: d.day, money: d.money, rest: d.rest, ts: Date.now() })); } catch (e) { /* nic */ }
+  $('saveCode').value = d.code;
+  paintResume();
+});
+$('saveCopy').onclick = () => {
+  const code = $('saveCode').value;
+  if (!code) return;
+  const done = () => toast('Kód uložení zkopírován. Vlož ho v menu: „Pokračovat ve Dnech“.');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, () => { $('saveCode').select(); toast('Označeno – zkopíruj ho ručně (Ctrl+C).'); });
+  else { $('saveCode').select(); toast('Označeno – zkopíruj ho ručně (Ctrl+C).'); }
+};
+function paintResume() {
+  const sv = loadStoredSave();
+  const b = $('resumeLast');
+  if (!sv) { b.classList.add('hidden'); return; }
+  b.classList.remove('hidden');
+  b.textContent = '▶ Pokračovat: den ' + sv.day + ' · ' + sv.money + ' Kč' + (RESTS[sv.rest] ? ' · ' + RESTS[sv.rest].icon + ' ' + RESTS[sv.rest].name : '');
+}
+$('resumeLast').onclick = () => {
+  const sv = loadStoredSave();
+  if (!sv) return;
+  Sound.init(); menuError('');
+  socket.emit('resume', { code: sv.code, name: getName(), look: myLook });
+};
+$('resumeBtn').onclick = () => {
+  const code = $('resumeCode').value.trim();
+  if (!code) return menuError('Vlož kód uložení.');
+  Sound.init(); menuError('');
+  socket.emit('resume', { code, name: getName(), look: myLook });
+};
+paintResume();
+
 function renderShop(d) {
   const sm = d.summary;
   $('shopTitle').textContent = sm ? 'Den ' + sm.day + ' skončil' : 'Objednávka surovin';
   const lines = [];
   if (sm) {
-    lines.push('Výdělek ' + (sm.net >= 0 ? '+' : '') + sm.net + ' Kč  ·  Nájem −' + sm.rent + ' Kč  ·  Odevzdáno ' + sm.delivered + '  ·  Propadlo ' + sm.expired);
+    lines.push('Výdělek ' + (sm.net >= 0 ? '+' : '') + sm.net + ' Kč  ·  Nájem −' + sm.rent + ' Kč' + (sm.wages ? '  ·  Platy −' + sm.wages + ' Kč' : '') + '  ·  Odevzdáno ' + sm.delivered + '  ·  Propadlo ' + sm.expired);
+    if (sm.rep !== undefined) lines.push('⭐ Reputace na konci dne: ' + sm.rep.toFixed(1) + ' / 5');
     if (sm.goal) lines.push('🎯 ' + sm.goal.text + ': ' + (sm.goal.ok ? '✔ splněno, bonus +' + sm.goal.reward + ' Kč' : '✘ nesplněno'));
     if (sm.mvp) lines.push('🏆 MVP dne: ' + sm.mvp.n + ' (' + sm.mvp.pts + ' b.)');
     if (sm.stat) lines.push('🍔 ' + sm.stat.dishes + '  ·  🥤 ' + sm.stat.drinks + '  ·  🐀 zabito ' + sm.stat.rats + '  ·  🧯 uhašeno ' + sm.stat.fires);
   }
   $('shopSummary').textContent = lines.join('\n');
   $('shopMoney').textContent = d.money;
-  $('shopRent').textContent = 'Nájem za den ' + d.day + ': ' + d.rent + ' Kč – nech si na něj!';
+  $('shopRent').textContent = 'Nájem za den ' + d.day + ': ' + d.rent + ' Kč' + (d.wages ? ' + platy zaměstnanců ' + d.wages + ' Kč' : '') + ' – nech si na to!';
 
   // zítřek: modifikátor a cíl
   const nx = $('shopNext');
@@ -608,6 +654,14 @@ function renderShop(d) {
     t.className = 'nextline';
     const b1 = document.createElement('b'); b1.textContent = '📅 Den ' + d.day + ': ' + d.today.n;
     const sp = document.createElement('span'); sp.textContent = d.today.d;
+    t.append(b1, sp);
+    nx.appendChild(t);
+  }
+  if (d.rep !== undefined) {
+    const t = document.createElement('div');
+    t.className = 'nextline';
+    const b1 = document.createElement('b'); b1.textContent = '⭐ Reputace: ' + d.rep.toFixed(1) + ' / 5';
+    const sp = document.createElement('span'); sp.textContent = 'Čím vyšší, tím častěji chodí zákazníci. Pod 0,3 hra končí. Kritici a štamgasti ji ovlivní nejvíc.';
     t.append(b1, sp);
     nx.appendChild(t);
   }
@@ -647,6 +701,31 @@ function renderShop(d) {
     card.append(tx, b);
     rb.appendChild(card);
   });
+
+  // zaměstnanci
+  const sb = $('shopStaff');
+  sb.innerHTML = '';
+  (d.staff || []).forEach((h) => {
+    const card = document.createElement('div');
+    card.className = 'restcard' + (h.lvl ? ' sel' : '') + (h.locked ? ' locked' : '');
+    const tx = document.createElement('div');
+    tx.className = 'rtx';
+    const hd = document.createElement('b');
+    hd.textContent = h.icon + ' ' + h.name + (h.lvl ? '  ' + '●'.repeat(h.lvl) + '○'.repeat(3 - h.lvl) : '');
+    const sm2 = document.createElement('small');
+    sm2.textContent = h.locked ? '🔒 Od dne ' + h.minDay + ' · ' + h.desc : h.desc + ' · plat ' + h.wage + ' Kč/den';
+    tx.append(hd, sm2);
+    card.appendChild(tx);
+    const mkBtn = (txt, dis, fn) => { const b = document.createElement('button'); b.className = 'btn small'; b.textContent = txt; b.disabled = dis; b.onclick = fn; card.appendChild(b); };
+    if (!h.lvl) mkBtn(h.locked ? '🔒 den ' + h.minDay : 'Najmout ' + h.hire + ' Kč', h.locked || h.hire > d.money, () => { Sound.init(); socket.emit('hire', { id: h.id }); });
+    else {
+      if (h.train !== null) mkBtn('Zlepšit ' + h.train + ' Kč', h.train > d.money, () => { Sound.init(); socket.emit('train', { id: h.id }); });
+      else mkBtn('MAX', true, () => {});
+      mkBtn('Propustit', false, () => socket.emit('dismiss', { id: h.id }));
+    }
+    sb.appendChild(card);
+  });
+  $('staffInfo').textContent = d.wages ? '(platy celkem ' + d.wages + ' Kč / den)' : '(zatím nikoho nemáš)';
 
   // krabice se zásobami (ceny se každý den mění)
   const box = $('shopItems');
@@ -915,6 +994,7 @@ function handleEvents(list) {
         break;
       }
       case 'drop': Sound.play('drop'); if (e.m) float(e.x, 1.4, e.y, e.m, '#8dff9f'); break;
+      case 'rep': float(e.x, 1.9, e.y, (TYPE_ICON[e.ty] || '⭐') + ' ' + (e.d > 0 ? '+' : '') + e.d + ' ⭐', e.d > 0 ? '#ffe082' : '#ff9a90'); break;
       case 'fire': Sound.play('fire'); float(e.x, 1.6, e.y, '🔥 Hoří!', '#ffb347'); break;
       case 'extinguish': Sound.play('extinguish'); float(e.x, 1.6, e.y, '✔ Uhašeno!', '#8dff9f'); break;
       case 'splat': Sound.play('splat'); float(e.x, 0.6, e.y, e.cat ? '🐈 Kočka chytila krysu!' : '🐀 +' + e.v + (gameMode === 'days' ? ' Kč' : ''), '#8dff9f'); break;
@@ -1364,13 +1444,26 @@ function makeBoxModel(k) {
   const g = new THREE.Group();
   M(geo('Box', 0.44, 0.34, 0.4), '#b98b4f', 0, 0.17, 0, g);
   M(geo('Box', 0.46, 0.03, 0.1), '#d9b87a', 0, 0.345, 0, g, { noShadow: true });
-  const lbl = new THREE.Mesh(geo('Plane', 0.22, 0.22), iconMat(k));
-  lbl.position.set(0, 0.17, 0.205);
-  g.add(lbl);
+  // štítek s ikonou je na všech čtyřech stranách, přední (+z) se otáčí podle toho, jak byla krabice položena
+  [[0, 0.205, 0], [0, -0.205, Math.PI], [0.225, 0, Math.PI / 2], [-0.225, 0, -Math.PI / 2]].forEach((q, i) => {
+    const lbl = new THREE.Mesh(geo('Plane', 0.22, 0.22), iconMat(k));
+    if (i < 2) lbl.position.set(0, 0.17, q[1]); else lbl.position.set(q[0], 0.17, 0);
+    lbl.rotation.y = q[2];
+    g.add(lbl);
+  });
   return g;
 }
+
+// Kterým směrem je k obsluze volná podlaha: vrací úhel otočení kolem y (přední strana +z míří k hráči)
+function faceAngle(x, y) {
+  for (const [dx, dz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+    const row = map[y + dz];
+    if (row && row[x + dx] === '.') return Math.atan2(dx, dz);
+  }
+  return 0;
+}
 function makeItem(item) {
-  if (item.t === 'b') { const b = makeBoxModel(item.k); b.scale.setScalar(1.35); return b; }
+  if (item.t === 'b') { const b = makeBoxModel(item.k); b.scale.setScalar(1.35); b.rotation.y = item.r || 0; return b; }
   if (item.t === 'c') { const c = makeCup(item.d); c.scale.setScalar(0.8); return c; }
   if (item.t === 'x') { const e = makeExt(); e.scale.setScalar(0.75); return e; }
   if (item.t === 'p') { const p = makePlate(item.c, false); p.scale.setScalar(0.74); return p; }
@@ -1386,6 +1479,7 @@ let barEls = [];              // { key, ch, el, fill, txt }
 let textEls = [];             // { el, wx, wy, wz, key, kind }
 let hilite = null;
 const world = $('world');
+const helperObjs = new Map(); // 'dish' | 'cook' | 'stock' -> { person, x, z, ang, tag }
 const fireObjs = new Map();   // 'x,y' -> { g, flames, smoke, bar, fill }
 const ratObjs = new Map();    // id -> { g, x, y, tx, ty, a, ta, st, phase }
 
@@ -1409,7 +1503,7 @@ function buildKitchen() {
   }
   world.innerHTML = '';
   barEls = []; textEls = []; dyn = {};
-  fireObjs.clear(); ratObjs.clear();
+  fireObjs.clear(); ratObjs.clear(); helperObjs.clear();
   kitchen = new THREE.Group();
   scene.add(kitchen);
 
@@ -1498,20 +1592,24 @@ function buildKitchen() {
           addBar(x, y, ch);
           break;
         case 'F': {
+          const fg = new THREE.Group();
+          fg.position.set(cx, 0, cz);
+          fg.rotation.y = faceAngle(x, y);
+          kitchen.add(fg);
           if (theme.stove === 'cooker') {                 // sushi: rýžovar
             M(geo('Box', 1, TOP - 0.08, 1), '#b0bec5', cx, (TOP - 0.08) / 2, cz, kitchen);
             M(geo('Box', 1.02, 0.08, 1.02), '#eceff1', cx, TOP - 0.04, cz, kitchen);
             M(geo('Cylinder', 0.4, 0.4, 0.28, 18), '#fafafa', cx, TOP + 0.14, cz, kitchen);
             M(geo('Cylinder', 0.33, 0.33, 0.02, 18), '#3b4750', cx, TOP + 0.285, cz, kitchen, { noShadow: true });
-            M(geo('Box', 0.2, 0.1, 0.06), '#455a64', cx, TOP + 0.1, cz + 0.4, kitchen, { noShadow: true });
-            M(geo('Sphere', 0.03, 6, 5), '#ff5252', cx + 0.05, TOP + 0.1, cz + 0.43, kitchen, { noShadow: true, mat: { emissive: '#ff1744' } });
+            M(geo('Box', 0.2, 0.1, 0.06), '#455a64', 0, TOP + 0.1, 0.4, fg, { noShadow: true });
+            M(geo('Sphere', 0.03, 6, 5), '#ff5252', 0.05, TOP + 0.1, 0.43, fg, { noShadow: true, mat: { emissive: '#ff1744' } });
           } else if (theme.stove === 'oven') {            // pizza: kamnená pec
             M(geo('Box', 1, TOP - 0.08, 1), '#8d4a32', cx, (TOP - 0.08) / 2, cz, kitchen);
             M(geo('Box', 1.02, 0.08, 1.02), '#a86044', cx, TOP - 0.04, cz, kitchen);
-            const dome = M(geo('Sphere', 0.46, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), '#a1583a', cx, TOP, cz - 0.14, kitchen);
+            const dome = M(geo('Sphere', 0.46, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), '#a1583a', 0, TOP, -0.14, fg);
             dome.scale.y = 0.75;
-            M(geo('Box', 0.4, 0.2, 0.1), '#1a0f0a', cx, TOP + 0.12, cz + 0.28, kitchen, { noShadow: true, mat: { emissive: '#7a1d00' } });
-            M(geo('Cylinder', 0.34, 0.34, 0.03, 18), '#bdb6a6', cx, TOP + 0.015, cz + 0.16, kitchen, { noShadow: true });
+            M(geo('Box', 0.4, 0.2, 0.1), '#1a0f0a', 0, TOP + 0.12, 0.28, fg, { noShadow: true, mat: { emissive: '#7a1d00' } });
+            M(geo('Cylinder', 0.34, 0.34, 0.03, 18), '#bdb6a6', 0, TOP + 0.015, 0.16, fg, { noShadow: true });
           } else {
             M(geo('Box', 1, TOP - 0.08, 1), '#2b2d33', cx, (TOP - 0.08) / 2, cz, kitchen);
             M(geo('Box', 1.02, 0.08, 1.02), '#3d4048', cx, TOP - 0.04, cz, kitchen);
@@ -1550,10 +1648,14 @@ function buildKitchen() {
         case 'A': case 'E': case 'O': {
           const dk = TAP[ch];
           counter(kitchen, x, y);
-          M(geo('Box', 0.84, 0.8, 0.46), '#2f3640', cx, TOP + 0.4, cz - 0.24, kitchen);
-          M(geo('Box', 0.7, 0.34, 0.04), DRINK_COL[dk], cx, TOP + 0.5, cz + 0.0, kitchen, { noShadow: true, mat: { emissive: DRINK_COL[dk] } });
-          M(geo('Cylinder', 0.05, 0.05, 0.2, 8), '#aab4bd', cx, TOP + 0.7, cz + 0.06, kitchen);
-          M(geo('Box', 0.5, 0.04, 0.4), '#555d66', cx, TOP + 0.02, cz + 0.2, kitchen, { noShadow: true });
+          const tg = new THREE.Group();                       // přední strana (+z) míří tam, kde stojí hráč
+          tg.position.set(cx, 0, cz);
+          tg.rotation.y = faceAngle(x, y);
+          kitchen.add(tg);
+          M(geo('Box', 0.84, 0.8, 0.46), '#2f3640', 0, TOP + 0.4, -0.24, tg);
+          M(geo('Box', 0.7, 0.34, 0.04), DRINK_COL[dk], 0, TOP + 0.5, 0.0, tg, { noShadow: true, mat: { emissive: DRINK_COL[dk] } });
+          M(geo('Cylinder', 0.05, 0.05, 0.2, 8), '#aab4bd', 0, TOP + 0.7, 0.06, tg);
+          M(geo('Box', 0.5, 0.04, 0.4), '#555d66', 0, TOP + 0.02, 0.2, tg, { noShadow: true });
           const lb = labelSprite(NAMES[dk], '#fff', 0.95);
           lb.position.set(cx, TOP + 1.05, cz);
           kitchen.add(lb);
@@ -1603,6 +1705,7 @@ function buildKitchen() {
     d.g = new THREE.Group();
     d.g.userData.dynamic = true;
     d.g.position.set(d.x + 0.5, d.ch === 'R' ? 0 : TOP, d.y + 0.5);
+    if (d.ch === 'R' || d.ch === 'F') d.g.rotation.y = faceAngle(d.x, d.y);
     d.sig = null;
     kitchen.add(d.g);
   }
@@ -1806,6 +1909,43 @@ function updateFires(tm) {
     if (live.has(key)) continue;
     kitchen.remove(o.g); o.bar.remove(); fireObjs.delete(key);
   }
+}
+
+/* ---------- pomocníci (Dny) ---------- */
+function updateHelpersView(dt, tm) {
+  const live = new Set();
+  for (const h of snap.hp || []) {
+    live.add(h.k);
+    let o = helperObjs.get(h.k);
+    if (!o) {
+      const hl = HELPER_LOOK[h.k] || HELPER_LOOK.dish;
+      const person = makePerson({ shirt: hl.shirt, skin: rnd(SKINS), hair: rnd(HAIRS), apron: true, pants: '#2d3a4a' });
+      kitchen.add(person.g);
+      o = { person, x: h.x, z: h.y, ang: 0, ph: 0, tag: mkEl('nametag') };
+      helperObjs.set(h.k, o);
+    }
+    const hl = HELPER_LOOK[h.k] || HELPER_LOOK.dish;
+    const k = Math.min(1, dt * 6), ox = o.x, oz = o.z;
+    o.x += (h.x - o.x) * k; o.z += (h.y - o.z) * k;
+    const moving = dt > 0 && Math.hypot(o.x - ox, o.z - oz) / dt > 0.2;
+    const tang = Math.atan2(h.tx - o.x, h.ty - o.z);
+    let diff = tang - o.ang;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    o.ang += diff * Math.min(1, dt * 8);
+    const pr = o.person;
+    pr.g.position.set(o.x, 0, o.z);
+    pr.g.rotation.y = o.ang;
+    if (h.a) {                                          // pracuje: ruce se pohybují
+      const w = Math.sin(tm * (h.k === 'cook' ? 14 : 9));
+      pr.armL.rotation.x = -1.0 + w * 0.5; pr.armR.rotation.x = -1.0 - w * 0.5;
+      pr.body.position.y = Math.abs(w) * 0.03;
+    } else {
+      pr.armL.rotation.x = 0; pr.armR.rotation.x = 0; pr.body.position.y = 0;
+    }
+    const label = hl.name + ' ' + '●'.repeat(h.l);
+    if (o.tag.textContent !== label) o.tag.textContent = label;
+  }
+  for (const [k, o] of [...helperObjs]) if (!live.has(k)) { kitchen.remove(o.person.g); o.tag.remove(); helperObjs.delete(k); }
 }
 
 /* ---------- krysy ---------- */
@@ -2021,7 +2161,7 @@ function makeBubble() {
 function drawBubble(c, frac) {
   const b = c.bubble;
   const bucket = Math.floor(frac * 12);
-  const sig = [c.state, c.delivered.food, c.delivered.drink, c.served.food, c.served.drink, c.angry, bucket].join('|');
+  const sig = [c.ty, c.state, c.delivered.food, c.delivered.drink, c.served.food, c.served.drink, c.angry, bucket].join('|');
   if (sig === b.sig) return;
   b.sig = sig;
   const x = b.cv.getContext('2d');
@@ -2035,6 +2175,7 @@ function drawBubble(c, frac) {
   x.beginPath(); x.moveTo(110, 86); x.lineTo(128, 108); x.lineTo(146, 86); x.closePath(); x.fill();
   x.font = '40px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
   x.textAlign = 'center'; x.textBaseline = 'middle';
+  if (TYPE_ICON[c.ty]) { x.font = '26px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'; x.fillText(TYPE_ICON[c.ty], 28, 24); x.font = '40px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'; }
   if (c.angry) {
     x.fillText('😠', 128, 46);
   } else if (c.state === 'eat') {
@@ -2224,11 +2365,12 @@ function spawnCustomer(o, instant) {
   const seat = rnd(free);
   seat.busy = true;
   const rec = o.r ? recipes[o.r] : null;
-  const person = makePerson(randomLook());
+  const items = o.it || (rec ? rec.items : []);
+  const person = makePerson(Object.assign(randomLook(), TYPE_LOOK[o.ty] || {}));
   const c = {
-    id: o.id, seat, person, x: DOOR.x, z: DOOR.z, ang: Math.PI / 2, tang: Math.PI / 2, phase: Math.random() * 6, speed: 2.0 + Math.random() * 0.6,
+    ty: o.ty || 'normal', id: o.id, seat, person, x: DOOR.x, z: DOOR.z, ang: Math.PI / 2, tang: Math.PI / 2, phase: Math.random() * 6, speed: 2.0 + Math.random() * 0.6,
     path: [], onArrive: null, state: 'walkin', angry: false, gone: false, eating: false, eatT: 0, leaving: false,
-    foodIcons: rec ? rec.items.map((k) => ICONS[k]).join('') : '', drinkIcon: o.dr ? ICONS[o.dr] : '',
+    foodIcons: rec ? items.map((k) => ICONS[k]).join('') : '', drinkIcon: o.dr ? ICONS[o.dr] : '',
     served: { food: !o.r, drink: !o.dr }, delivered: { food: !o.r, drink: !o.dr }, tableItems: [], bubble: makeBubble(), frac: 1, look: null,
   };
   c.served = { food: false, drink: false }; c.delivered = { food: false, drink: false };
@@ -2489,6 +2631,13 @@ function updateHud() {
   const ts = '⏱ ' + Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
   if (ts !== hudCache.t) { hudCache.t = ts; $('timer').textContent = ts; }
   $('timer').classList.toggle('low', snap.t <= 10 && snap.cd === 0);
+  const repEl = $('rep');
+  if (snap.rp !== undefined) {
+    const rt = '⭐ ' + snap.rp.toFixed(1);
+    if (repEl.textContent !== rt) repEl.textContent = rt;
+    repEl.classList.remove('hidden');
+    repEl.classList.toggle('low', snap.rp < 1.5);
+  } else repEl.classList.add('hidden');
   const sc = gameMode === 'days' ? '💰 ' + snap.sc + ' Kč' : 'Skóre ' + snap.sc;
   if (sc !== hudCache.sc) { hudCache.sc = sc; $('score').textContent = sc; }
 
@@ -2504,16 +2653,18 @@ function updateHud() {
   snap.o.forEach((o) => {
     const rec = o.r ? recipes[o.r] : null;
     if (o.r && !rec) return;
+    const items = o.it || (rec ? rec.items : []);
     live.add(o.id);
     let e = orderEls.get(o.id);
     if (!e) {
       const el = document.createElement('div');
-      el.className = 'order' + (o.v ? ' vip' : '');
+      el.className = 'order' + (o.v ? ' vip' : '') + ' ty-' + (o.ty || 'normal');
+      el.title = TYPE_NAME[o.ty || 'normal'];
       const head = document.createElement('div');
       head.className = 'oh';
       const nm = document.createElement('b');
       nm.className = 'on';
-      nm.textContent = (o.v ? '⭐ ' : '') + (rec ? rec.name : NAMES[o.dr]);
+      nm.textContent = (o.v ? '⭐ ' : '') + (TYPE_ICON[o.ty] ? TYPE_ICON[o.ty] + ' ' : '') + (rec ? rec.name : NAMES[o.dr]);
       nm.title = nm.textContent;
       const tm = document.createElement('span');
       tm.className = 'otime';
@@ -2538,7 +2689,14 @@ function updateHud() {
       if (rec) {
         food = document.createElement('div');
         food.className = 'ofood';
-        rec.items.forEach((k) => food.appendChild(mkChip(k, PLATE_STATE[k])));
+        items.forEach((k) => food.appendChild(mkChip(k, PLATE_STATE[k])));
+        if (o.no) {                                       // host něco nechce
+          const ng = mkChip(o.no, null);
+          ng.classList.add('no'); ng.title = 'Bez: ' + NAMES[o.no];
+          const x = document.createElement('s'); x.textContent = '🚫';
+          ng.appendChild(x);
+          food.appendChild(ng);
+        }
         el.appendChild(food);
       }
       if (rec && o.dr) {
@@ -2678,6 +2836,7 @@ function updateOverlays() {
     t.el.classList.remove('hidden');
     place(t.el, t.x + (t.kind === 'dirty' ? 1 : 0.5), TOP + 0.55, t.y + 0.5);
   }
+  for (const o of helperObjs.values()) place(o.tag, o.x, 1.75, o.z);
   // jména kuchařů
   for (const [id, c] of chefs) {
     const a = actors.get(id);
@@ -2821,6 +2980,7 @@ function frame(now) {
   updateFires(now / 1000);
   updateRats(dt, now / 1000);
   updateRestaurant(dt, now / 1000);
+  updateHelpersView(dt, now / 1000);
   updateSpray(now / 1000);
   updateLights(dt);
   updateHighlight();

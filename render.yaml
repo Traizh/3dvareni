@@ -8,3 +8,6 @@ services:
     startCommand: npm start
     healthCheckPath: /healthz
     autoDeploy: true
+    envVars:
+      - key: SAVE_SECRET          # podpis kódů uložení (Dny); vygeneruje se jednou a zůstává stejný
+        generateValue: true

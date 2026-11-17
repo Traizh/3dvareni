@@ -71,3 +71,12 @@ Za výdejním pultem je celá jídelna: stoly, židle, okna, vchod a hosté. S k
 
 ## Vylepšení ve Dnech
 23 trvalých vylepšení v 5 záložkách (Kuchyň, Obsluha, Sklad, Bezpečnost, Provoz), dohromady 86 úrovní s rostoucí cenou. Část se odemyká až v pozdějších dnech (např. sprinklery ve dni 4, reklama ve dni 5), takže se nedají vykoupit hned. Nově mj.: silnější plotna, rychlé kohoutky a myčka, vozík na krabice, spropitné, větší police / krabice / sklad, dohoda s dodavatelem, sprinklery, kuchyňská kočka (chytá krysy), pojištění, pohodlné židle, VIP klub, delší otevírací doba a reklama. Ceny a efekty jsou v tabulce `UPGRADES` na začátku `server.js`.
+
+## Orientace kohoutků a krabic
+Kohoutky, rýžovary a pece se otáčejí přední stranou k místu, kde stojí hráč (dřív koukaly do zdi). Štítek s ikonou má krabice na všech čtyřech stranách; krabice položená na pult se otočí ke hráči, který ji položil, a krabice na regálech ve skladu koukají do uličky.
+
+## Pokračování, zákazníci a pomocníci (Dny)
+- **Uložení:** po každém dni (a po každém nákupu v obchodě) vznikne **kód uložení** – najdeš ho dole v obchodě, zkopíruješ tlačítkem a vložíš v menu v části „Pokračovat ve Dnech“. Poslední uložení si pamatuje i prohlížeč (tlačítko „▶ Pokračovat“). Ukládá se den, peníze, krabice, vylepšení, restaurace, reputace, zaměstnanci i kuchyně (věci na pultech, police, talíře). Kód je podepsaný (HMAC); na Renderu ho klíčuje proměnná `SAVE_SECRET` (v `render.yaml` se vygeneruje sama – kdyby se změnila, staré kódy přestanou platit).
+- **Zákazníci:** vybíravý host chce něco „bez“ (talíř musí odpovídat přesně), spěchající host má kratší čas a platí víc, štamgast je trpělivý a dává spropitné, kritik (od dne 3) chce vždy menu, platí dvojnásobek a hodně ovlivní reputaci. Typ je vidět na kartě objednávky, v bublině nad hostem i podle barvy oblečení.
+- **Reputace (⭐ 0–5):** spokojení hosté ji zvyšují, propadlé objednávky snižují. Čím vyšší, tím častěji chodí zákazníci. Pod 0,3 restaurace končí.
+- **Zaměstnanci:** myč nádobí, pomocný kuchař (krájí na prkénkách) a skladník (doplňuje police z krabic). Najímají se v obchodě, mají tři úrovně rychlosti a denní plat, který se strhává spolu s nájmem.

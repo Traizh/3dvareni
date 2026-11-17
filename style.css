@@ -399,3 +399,23 @@ canvas#game { cursor: crosshair; }
   background: #3a2616; border: 2px solid #5f3a1e; border-radius: 10px; white-space: nowrap; }
 .uptab.active { background: linear-gradient(#ff9d2e, #e5731a); border-color: #ffc16b; color: #2b1305; }
 .shoprow.upg.locked { opacity: .55; }
+
+/* ---------- Pokračování, reputace, typy hostů ---------- */
+#rightbox { display: flex; gap: 14px; align-items: center; justify-content: flex-end; min-width: 110px; }
+#rep { font-size: 1.15rem; font-weight: 800; color: #ffe082; }
+#rep.low { color: #ff8a80; animation: blink .8s steps(2) infinite; }
+.resume { margin-top: 12px; padding: 10px 12px; background: rgba(0,0,0,.25); border-radius: 14px; text-align: left; }
+.resume > b { display: block; margin-bottom: 6px; color: #ffd27a; }
+.resume .row { display: flex; gap: 6px; margin-top: 4px; }
+.resume input { flex: 1; min-width: 0; }
+.resume #resumeLast { width: 100%; margin: 0 0 4px; }
+.saverow { display: flex; gap: 6px; margin-top: 4px; }
+.saverow input { flex: 1; min-width: 0; font-size: .7rem; }
+.order.ty-critic { box-shadow: 0 0 0 2px #212121, 0 4px 12px rgba(0,0,0,.45); }
+.order.ty-impatient { box-shadow: 0 0 0 2px #ff7043, 0 4px 12px rgba(0,0,0,.45); }
+.order.ty-regular { box-shadow: 0 0 0 2px #8d6e63, 0 4px 12px rgba(0,0,0,.45); }
+.order.ty-picky { box-shadow: 0 0 0 2px #ab47bc, 0 4px 12px rgba(0,0,0,.45); }
+.order.vip { box-shadow: 0 0 0 2px #ffb300, 0 4px 12px rgba(0,0,0,.45); }
+.order .chip.no { background: rgba(211,47,47,.18); }
+.order .chip.no em, .order .chip.no small { text-decoration: line-through; opacity: .6; }
+.order .chip.no s { top: -4px; right: -3px; }

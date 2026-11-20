@@ -885,6 +885,8 @@ canvas.addEventListener('mousedown', (e) => {
     try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (err) { /* nic */ }
     return;
   }
+  const ha = actors.get(myId);
+  if (ha && ha.h && ha.h.t === 'x') { holdMouse = true; sendInput(true); return; }     // s hasicákem levé tlačítko jen stříká
   holdMouse = true; sendInput(true); press();      // levé tlačítko = interakce (jako E)
 });
 window.addEventListener('mouseup', () => { dragging = false; if (holdMouse) { holdMouse = false; sendInput(true); } });
@@ -924,7 +926,7 @@ socket.on('state', (s) => {
     seen.add(p.id);
     let a = actors.get(p.id);
     if (!a) { a = { id: p.id, x: p.x, y: p.y, phase: 0, moving: false, ang: Math.atan2(p.fx, p.fy), buf: [] }; actors.set(p.id, a); }
-    a.n = p.n; a.c = p.c; a.lk = p.lk; a.tx = p.x; a.ty = p.y; a.fx = p.fx; a.fy = p.fy; a.h = p.h;
+    a.n = p.n; a.c = p.c; a.lk = p.lk; a.sp = p.sp; a.tx = p.x; a.ty = p.y; a.fx = p.fx; a.fy = p.fy; a.h = p.h;
     if (p.id === myId) { if (gn !== null) reconcileCmd(p); else reconcile(p); }
     else {
       // ostatní hráči: ukládáme polohy s časem a vykreslujeme je o INTERP zpět (viz updateRemote)
@@ -1480,7 +1482,6 @@ let textEls = [];             // { el, wx, wy, wz, key, kind }
 let hilite = null;
 const world = $('world');
 const helperObjs = new Map(); // 'dish' | 'cook' | 'stock' -> { person, x, z, ang, tag }
-const fireObjs = new Map();   // 'x,y' -> { g, flames, smoke, bar, fill }
 const ratObjs = new Map();    // id -> { g, x, y, tx, ty, a, ta, st, phase }
 
 function mkEl(cls, html) {
@@ -1503,7 +1504,7 @@ function buildKitchen() {
   }
   world.innerHTML = '';
   barEls = []; textEls = []; dyn = {};
-  fireObjs.clear(); ratObjs.clear(); helperObjs.clear();
+  fxReset(); ratObjs.clear(); helperObjs.clear();
   kitchen = new THREE.Group();
   scene.add(kitchen);
 
@@ -1857,58 +1858,159 @@ function animateStove(d, tm) {
   }
 }
 
-/* ---------- oheň ---------- */
-const bmatCache = {};
-const bmat = (c) => bmatCache[c] || (bmatCache[c] = new THREE.MeshBasicMaterial({ color: c }));
+/* ---------- oheň a sprej: částicové efekty ----------
+ * Plameny ze serveru jsou volné body (ne dlaždice). Z každého vyletují měkké světélkující částice (oheň),
+ * z větších i kouř; hasicák stříká kužel pěny. Všechno jsou billboardové sprity z jedné texturky. */
+const fxTex = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 64;
+  const x = cv.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.65)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(cv);
+})();
+function makeFxPool(n, additive) {
+  const pool = [];
+  for (let i = 0; i < n; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: fxTex, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, opacity: 0 }));
+    sp.visible = false;
+    scene.add(sp);
+    pool.push({ sp, on: false, age: 0, life: 1, vx: 0, vy: 0, vz: 0, s: 0.3, kind: 0 });
+  }
+  return pool;
+}
+const fxFlame = makeFxPool(300, true);
+const fxSmoke = makeFxPool(90, false);
+const fxSpray = makeFxPool(150, false);
+const fxGlow = makeFxPool(24, true);
+const fireLights = [new THREE.PointLight(0xff7a22, 0, 5), new THREE.PointLight(0xff7a22, 0, 5)];
+fireLights.forEach((l) => scene.add(l));
+const flameAcc = [];
+let sprayAccL = 0;
+const fxScale = () => [1, 0.6, 0.35][qLevel] || 1;
 
-function makeFire(x, y) {
-  const g = new THREE.Group();
-  g.position.set(x + 0.5, TOP, y + 0.5);
-  const flames = [];
-  for (let i = 0; i < 10; i++) {
-    const a = i * 2.4, r = i === 0 ? 0 : 0.12 + (i % 3) * 0.1;
-    const f = new THREE.Mesh(geo('Cone', 0.13, 0.5, 6), bmat(['#ff5a00', '#ff9d00', '#ffd23a'][i % 3]));
-    f.position.set(Math.cos(a) * r, 0.2, Math.sin(a) * r);
-    g.add(f);
-    flames.push(f);
+function fxSpawn(pool) {
+  for (const p of pool) if (!p.on) { p.on = true; p.age = 0; p.sp.visible = true; return p; }
+  return null;
+}
+function fxReset() {
+  [fxFlame, fxSmoke, fxSpray, fxGlow].forEach((pool) => pool.forEach((p) => { p.on = false; p.sp.visible = false; }));
+  fireLights.forEach((l) => { l.intensity = 0; });
+}
+function fxStep(pool, dt, fn) {
+  for (const p of pool) {
+    if (!p.on) continue;
+    p.age += dt;
+    if (p.age >= p.life) { p.on = false; p.sp.visible = false; continue; }
+    p.sp.position.x += p.vx * dt; p.sp.position.y += p.vy * dt; p.sp.position.z += p.vz * dt;
+    fn(p, p.age / p.life);
   }
-  const smoke = [];
-  for (let i = 0; i < 4; i++) {
-    const m = new THREE.Mesh(geo('Sphere', 0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#3a3a3a', transparent: true, opacity: 0.5 }));
-    m.userData.i = i;
-    g.add(m);
-    smoke.push(m);
-  }
-  const bar = mkEl('bar firebar', '<i></i><span>🔥</span>');
-  return { g, flames, smoke, bar, fill: bar.firstChild, x, y };
 }
 
-function updateFires(tm) {
-  const live = new Set();
-  for (const f of snap.fi || []) {
-    const key = f.x + ',' + f.y;
-    live.add(key);
-    let o = fireObjs.get(key);
-    if (!o) { o = makeFire(f.x, f.y); fireObjs.set(key, o); kitchen.add(o.g); }
-    const size = 0.35 + 0.65 * f.h;
-    o.flames.forEach((fl, i) => {
-      const k = size * (0.75 + 0.45 * Math.sin(tm * 11 + i * 1.9));
-      fl.scale.set(size, Math.max(0.15, k) * 1.5, size);
-      fl.position.y = 0.05 + 0.25 * Math.max(0.15, k);
-    });
-    o.smoke.forEach((m) => {
-      const ph = (tm * 0.6 + m.userData.i / 4) % 1;
-      m.position.set(Math.sin(ph * 7 + m.userData.i * 2) * 0.15, 0.5 + ph * 1.1, Math.cos(ph * 5 + m.userData.i) * 0.15);
-      m.scale.setScalar(0.8 + ph * 1.6);
-      m.material.opacity = 0.55 * (1 - ph);
-    });
-    o.fill.style.width = Math.max(4, f.h * 100) + '%';
-    place(o.bar, f.x + 0.5, TOP + 1.0, f.y + 0.5);
+function updateFlames(dt, tm) {
+  const list = snap && snap.fl ? snap.fl : [];
+  const q = fxScale();
+  list.forEach((f, i) => {
+    const y = (f.f ? 0.06 : TOP + 0.02);
+    // oheň
+    flameAcc[i] = (flameAcc[i] || 0) + dt * (14 + 26 * f.h) * q;
+    while (flameAcc[i] >= 1) {
+      flameAcc[i] -= 1;
+      const p = fxSpawn(fxFlame);
+      if (!p) break;
+      const r = 0.1 + 0.24 * f.h;
+      p.sp.position.set(f.x + (Math.random() - 0.5) * r * 2, y, f.z + (Math.random() - 0.5) * r * 2);
+      p.life = 0.45 + Math.random() * 0.4;
+      p.vx = (Math.random() - 0.5) * 0.3; p.vz = (Math.random() - 0.5) * 0.3;
+      p.vy = (0.55 + Math.random() * 0.8) * (0.6 + 0.7 * f.h);
+      p.s = 0.22 + 0.38 * f.h;
+    }
+    // kouř z větších plamenů
+    if (f.h > 0.35 && Math.random() < dt * 3.2 * f.h * q) {
+      const p = fxSpawn(fxSmoke);
+      if (p) {
+        p.sp.position.set(f.x + (Math.random() - 0.5) * 0.3, y + 0.5, f.z + (Math.random() - 0.5) * 0.3);
+        p.life = 1.8 + Math.random() * 0.8;
+        p.vx = (Math.random() - 0.5) * 0.25; p.vz = (Math.random() - 0.5) * 0.25; p.vy = 0.5 + Math.random() * 0.4;
+        p.s = 0.35 + 0.3 * f.h;
+      }
+    }
+  });
+  flameAcc.length = list.length;
+  fxStep(fxFlame, dt, (p, t) => {
+    const k = Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.9);
+    const sc = p.s * (0.45 + 0.95 * k) * (1 - 0.35 * t);
+    p.sp.scale.set(sc, sc * 1.35, 1);
+    // bílá/žlutá jádra → oranž → tmavě rudá
+    const r = 1, g = t < 0.5 ? 0.95 - 0.7 * t : 0.6 - 0.9 * (t - 0.5), b = Math.max(0, 0.55 - 1.1 * t);
+    p.sp.material.color.setRGB(r * (1 - 0.35 * t), Math.max(0.1, g), b);
+    p.sp.material.opacity = 0.95 * (1 - t);
+  });
+  fxStep(fxSmoke, dt, (p, t) => {
+    const sc = p.s * (1 + 2.2 * t);
+    p.sp.scale.set(sc, sc, 1);
+    p.sp.material.color.setRGB(0.2, 0.2, 0.2);
+    p.sp.material.opacity = 0.34 * Math.sin(Math.min(1, t * 1.2) * Math.PI) * (t < 0.9 ? 1 : (1 - t) * 10);
+    if (p.sp.position.y > 2.6) { p.sp.position.y = 2.6; p.vy = 0; }
+  });
+  // záře kolem největších plamenů + světla
+  const big = list.map((f, i) => ({ f, i })).sort((a, b) => b.f.h - a.f.h);
+  fxGlow.forEach((p, i) => {
+    const e = big[i];
+    if (!e) { p.on = false; p.sp.visible = false; return; }
+    p.on = true; p.sp.visible = true;
+    const f = e.f, fl = 0.85 + 0.15 * Math.sin(tm * 17 + i * 3.1);
+    p.sp.position.set(f.x, (f.f ? 0.2 : TOP + 0.3), f.z);
+    p.sp.scale.set(1.8 * (0.5 + f.h) * fl, 1.8 * (0.5 + f.h) * fl, 1);
+    p.sp.material.color.setRGB(1, 0.45, 0.12);
+    p.sp.material.opacity = 0.2 * f.h * q;
+  });
+  fireLights.forEach((l, i) => {
+    const e = big[i];
+    if (!e) { l.intensity = 0; return; }
+    l.position.set(e.f.x, TOP + 0.8, e.f.z);
+    l.intensity = (1.1 + 0.3 * Math.sin(tm * 21 + i * 2.2)) * e.f.h * Math.min(1, q + 0.2);
+  });
+}
+
+// pěna z hasicáku: lokální hráč podle pohledu kamery, ostatní podle polohy a směru
+function emitSpray(ox, oy, oz, dx, dy, dz, n) {
+  for (let i = 0; i < n; i++) {
+    const p = fxSpawn(fxSpray);
+    if (!p) return;
+    const sp = 4.4 + Math.random() * 1.4;
+    p.sp.position.set(ox, oy, oz);
+    p.vx = dx * sp + (Math.random() - 0.5) * 0.9; p.vy = dy * sp + (Math.random() - 0.5) * 0.9 + 0.3; p.vz = dz * sp + (Math.random() - 0.5) * 0.9;
+    p.life = 0.42 + Math.random() * 0.2;
+    p.s = 0.12;
   }
-  for (const [key, o] of [...fireObjs]) {
-    if (live.has(key)) continue;
-    kitchen.remove(o.g); o.bar.remove(); fireObjs.delete(key);
+}
+function updateSprayFx(dt, tm) {
+  const q = fxScale();
+  const a = actors.get(myId);
+  if (a && a.h && a.h.t === 'x' && a.h.c > 0 && holdNow() && me && view === 'game') {
+    sprayAccL += dt * 70 * q;
+    const n = Math.floor(sprayAccL); sprayAccL -= n;
+    const cp = Math.cos(pitch), dx = Math.sin(yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(yaw) * cp;
+    const rx = -Math.cos(yaw), rz = Math.sin(yaw);
+    emitSpray(camera.position.x + dx * 0.55 + rx * 0.22, camera.position.y + dy * 0.55 - 0.28, camera.position.z + dz * 0.55 + rz * 0.22, dx, dy, dz, n);
   }
+  for (const o of actors.values()) {
+    if (o.id === myId || !o.sp) continue;
+    o.spAcc = (o.spAcc || 0) + dt * 70 * q;
+    const n = Math.floor(o.spAcc); o.spAcc -= n;
+    emitSpray(o.x + o.fx * 0.6, 0.9, o.y + o.fy * 0.6, o.fx, -0.04, o.fy, n);
+  }
+  fxStep(fxSpray, dt, (p, t) => {
+    p.vy -= 1.6 * dt;
+    const sc = p.s + 0.55 * t;
+    p.sp.scale.set(sc, sc, 1);
+    p.sp.material.color.setRGB(0.88, 0.94, 1);
+    p.sp.material.opacity = 0.6 * (1 - t);
+  });
 }
 
 /* ---------- pomocníci (Dny) ---------- */
@@ -1916,32 +2018,37 @@ function updateHelpersView(dt, tm) {
   const live = new Set();
   for (const h of snap.hp || []) {
     live.add(h.k);
+    const hl = HELPER_LOOK[h.k] || HELPER_LOOK.dish;
     let o = helperObjs.get(h.k);
     if (!o) {
-      const hl = HELPER_LOOK[h.k] || HELPER_LOOK.dish;
       const person = makePerson({ shirt: hl.shirt, skin: rnd(SKINS), hair: rnd(HAIRS), apron: true, pants: '#2d3a4a' });
       kitchen.add(person.g);
-      o = { person, x: h.x, z: h.y, ang: 0, ph: 0, tag: mkEl('nametag') };
+      o = { person, x: h.x, z: h.y, ang: h.ang, ph: 0, carry: null, tag: mkEl('nametag') };
       helperObjs.set(h.k, o);
     }
-    const hl = HELPER_LOOK[h.k] || HELPER_LOOK.dish;
-    const k = Math.min(1, dt * 6), ox = o.x, oz = o.z;
+    const k = Math.min(1, dt * 10);
     o.x += (h.x - o.x) * k; o.z += (h.y - o.z) * k;
-    const moving = dt > 0 && Math.hypot(o.x - ox, o.z - oz) / dt > 0.2;
-    const tang = Math.atan2(h.tx - o.x, h.ty - o.z);
-    let diff = tang - o.ang;
+    let diff = h.ang - o.ang;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    o.ang += diff * Math.min(1, dt * 8);
+    o.ang += diff * Math.min(1, dt * 10);
     const pr = o.person;
     pr.g.position.set(o.x, 0, o.z);
     pr.g.rotation.y = o.ang;
-    if (h.a) {                                          // pracuje: ruce se pohybují
+    // nesený předmět (talíř / krabice)
+    if (h.c !== o.carry) {
+      o.carry = h.c;
+      clearGroup(pr.holder);
+      if (h.c === 'plate') { const pl = makePlate([], false); pl.scale.setScalar(0.74); pr.holder.add(pl); }
+      else if (typeof h.c === 'string' && h.c.indexOf('box:') === 0) { const bx = makeBoxModel(h.c.slice(4)); bx.scale.setScalar(1.3); pr.holder.add(bx); }
+    }
+    if (h.m) o.ph += dt * 10;
+    if (h.c) { pr.armL.rotation.x = -1.15; pr.armR.rotation.x = -1.15; pr.body.position.y = h.m ? Math.abs(Math.sin(o.ph)) * 0.04 : 0; }
+    else if (h.m) { pr.armL.rotation.x = Math.sin(o.ph) * 0.7; pr.armR.rotation.x = -Math.sin(o.ph) * 0.7; pr.body.position.y = Math.abs(Math.sin(o.ph)) * 0.04; }
+    else if (h.a) {                                     // pracuje na místě
       const w = Math.sin(tm * (h.k === 'cook' ? 14 : 9));
       pr.armL.rotation.x = -1.0 + w * 0.5; pr.armR.rotation.x = -1.0 - w * 0.5;
       pr.body.position.y = Math.abs(w) * 0.03;
-    } else {
-      pr.armL.rotation.x = 0; pr.armR.rotation.x = 0; pr.body.position.y = 0;
-    }
+    } else { pr.armL.rotation.x = 0; pr.armR.rotation.x = 0; pr.body.position.y = 0; }
     const label = hl.name + ' ' + '●'.repeat(h.l);
     if (o.tag.textContent !== label) o.tag.textContent = label;
   }
@@ -1993,36 +2100,6 @@ function updateRats(dt, tm) {
     o.body.rotation.x = o.st === 1 ? Math.sin(tm * 18) * 0.18 : 0;      // hlodá
     o.tail.rotation.z = Math.sin(tm * 9 + o.x) * 0.5;
   }
-}
-
-/* ---------- sprej z hasicáku (u kamery) ---------- */
-const sprayG = new THREE.Group();
-sprayG.position.set(0.3, -0.35, -0.7);
-sprayG.visible = false;
-camera.add(sprayG);
-const sprayDots = [];
-for (let i = 0; i < 14; i++) {
-  const d = new THREE.Mesh(geo('Sphere', 0.05, 6, 5), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.7 }));
-  d.userData.i = i;
-  sprayG.add(d);
-  sprayDots.push(d);
-}
-function updateSpray(tm) {
-  const a = actors.get(myId);
-  const ext = a && a.h && a.h.t === 'x' && a.h.c > 0;
-  let on = false;
-  if (ext && holdNow() && me && snap && snap.fi) {
-    const [tx, ty] = targetTile(me);
-    on = snap.fi.some((f) => f.x === tx && f.y === ty);
-  }
-  sprayG.visible = on;
-  if (!on) return;
-  sprayDots.forEach((d) => {
-    const ph = (tm * 2.4 + d.userData.i / sprayDots.length) % 1;
-    d.position.set((Math.random() - 0.5) * 0.05 * ph, (Math.random() - 0.5) * 0.05 * ph + 0.1 * ph, -ph * 1.4);
-    d.scale.setScalar(0.6 + ph * 2.2);
-    d.material.opacity = 0.75 * (1 - ph);
-  });
 }
 
 /* =====================================================================
@@ -2760,7 +2837,7 @@ function updateHud() {
     if (ex.textContent !== t) ex.textContent = t;
     ex.classList.remove('hidden');
   } else if (mine && mine.h && mine.h.t === 'x') {
-    const t = '🧯 ' + Math.round(mine.h.c * 100) + ' %  ·  míř na oheň a drž E / myš';
+    const t = '🧯 ' + Math.round(mine.h.c * 100) + ' %  ·  drž levé tlačítko a miř na plameny  ·  E = vrátit do držáku';
     if (ex.textContent !== t) ex.textContent = t;
     ex.classList.remove('hidden');
   } else ex.classList.add('hidden');
@@ -2977,11 +3054,11 @@ function frame(now) {
   updateCamera(now / 1000);
   syncChefs(dt);
   updateStations(now / 1000);
-  updateFires(now / 1000);
+  updateFlames(dt, now / 1000);
   updateRats(dt, now / 1000);
   updateRestaurant(dt, now / 1000);
   updateHelpersView(dt, now / 1000);
-  updateSpray(now / 1000);
+  updateSprayFx(dt, now / 1000);
   updateLights(dt);
   updateHighlight();
   renderer.render(scene, camera);

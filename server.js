@@ -43,8 +43,9 @@ const FILL_TIME = 1.4;       // s držení pod kohoutkem
 const FILL_BUMP = 0.34;      // posun při jednom stisku
 // Oheň a hasicák
 const FIRE_IGNITE_DELAY = 4; // s po spálení masa se sporák vznítí
-const FIRE_SPREAD = 4.5;     // s mezi pokusy o rozšíření ohně
-const EXT_TIME = 1.1;        // s stříkání na uhašení jednoho ohně
+const FLAME_CAP = 40;        // max. počet plamenů najednou
+const SPRAY_RANGE = 2.8;     // dosah hasicáku (v dlaždicích)
+const SPRAY_COS = 0.88;      // polovina úhlu kuželu (~28°)
 const EXT_DRAIN = 0.1;       // spotřeba hasicáku za s stříkání (10 s plně)
 // Krysy
 const RAT_SPEED = 2.3;
@@ -429,7 +430,7 @@ function createRoom(mode) {
     rep: 3, helpers: { dish: 0, cook: 0, stock: 0 }, hk: { dish: 0, stock: 0, flash: 0, cookOn: false },
     upgrades: {}, prices: Object.assign({}, PRICES), today: null, nextGoal: null, goal: null,
     stat: { dishes: 0, drinks: 0, rats: 0, fires: 0 },
-    fires: {}, rats: [], ratSeq: 0, nextRat: 0, chaos: null, nextChaos: 0,
+    fires: {}, flames: [], flameSeq: 0, fuel: {}, wet: {}, ag: {}, rats: [], ratSeq: 0, nextRat: 0, chaos: null, nextChaos: 0,
     st: {}, stoves: [], sinks: [], orders: [], returns: [], events: [],
     time: 0, cd: 0, score: 0, plates: 0, dirty: 0,
     delivered: 0, expired: 0, orderSeq: 0, nextOrder: 0, last: null,
@@ -619,7 +620,7 @@ function beginRound(room) {
   room.dayStartMoney = room.money;
   room.stat = { dishes: 0, drinks: 0, rats: 0, fires: 0 };
   room.goal = room.mode === 'days' ? room.nextGoal : null;
-  room.fires = {}; room.rats = []; room.chaos = null;
+  room.fires = {}; room.flames = []; room.fuel = {}; room.wet = {}; room.ag = {}; room.rats = []; room.chaos = null;
   const slow = room.players.size <= 1 ? 1.3 : 1;
   room.nextRat = (modIs(room, 'vermin') ? 14 : 24) * slow * (1 + 0.4 * up(room, 'trap'));
   room.nextChaos = 32 * slow;
@@ -770,9 +771,13 @@ function endDay(room) {
     p.held = null; p.input = { dx: 0, dy: 0, hold: false };
   }
   // oheň zhasne, krysy odejdou, spálené jídlo se uklidí; věci na pultech a v polici zůstanou na další den
-  room.fires = {}; room.rats = []; room.chaos = null;
+  for (const a of Object.values(room.ag)) {                       // rozpracovaná krabice se vrátí do skladu
+    if (a.job && a.job.k && (a.st === 'toRack' || a.st === 'toShelf')) room.boxes[a.job.k] = Math.min(boxCapOf(room), (room.boxes[a.job.k] || 0) + 1);
+  }
+  room.fires = {}; room.flames = []; room.fuel = {}; room.wet = {}; room.ag = {}; room.rats = []; room.chaos = null;
   for (const key in room.st) {
     const o = room.st[key];
+    delete o.claimed;
     if (o.type === 'F' && o.item && o.item.s === 'burnt') { o.item = null; resetStation(o); }
   }
   room.dirty += room.returns.length; room.returns = [];
@@ -993,50 +998,120 @@ function fillBlocked(room, p, st, fx, fy) {
   return false;
 }
 
-/* ---------- Oheň a hasicák ---------- */
-function igniteAt(room, x, y) {
-  const key = x + ',' + y;
-  if (room.fires[key] || !FLAMMABLE.has(tileAtR(room, x, y))) return false;
-  room.fires[key] = { x, y, hp: 1, spread: FIRE_SPREAD * (0.8 + Math.random() * 0.5) };
-  const st = room.st[key];
-  if (st) {
-    destroyItem(room, st);
-    if (st.type === 'T') st.prog = 0;
-    if (st.type === 'S' || st.type === 'T') st.n = Math.floor(st.n / 2);      // část zásob shoří
+/* ---------- Oheň a hasicák ----------
+ * Plameny jsou volné body v prostoru (ne dlaždice): rostou, spotřebovávají palivo pultu, na kterém hoří,
+ * a šíří se do okolí podle své síly – na hořlavé pulty i jako krátké plameny po podlaze.
+ * room.fires je odvozená mapa „které políčko hoří“ (pro blokování pultu, krysy, objednávky...). */
+function rebuildFires(room) {
+  room.fires = {};
+  for (const f of room.flames) {
+    if (!f.key || f.h <= 0.12) continue;
+    const t = room.fires[f.key] || (room.fires[f.key] = { x: f.tx, y: f.ty, hp: 0 });
+    t.hp = Math.max(t.hp, f.h);
   }
-  ev(room, 'fire', x + 0.5, y + 0.5, { m: 'Hoří!' });
+}
+
+function addFlame(room, x, z, h, floor) {
+  const tx = Math.floor(x), ty = Math.floor(z);
+  room.flames.push({ id: ++room.flameSeq, x, z, h, tx, ty, floor: !!floor, key: floor ? null : tx + ',' + ty, sp: 1.6 + Math.random() * 1.8 });
+}
+
+// zapálí bod ve světových souřadnicích; vrací true, pokud tam vznikl nový plamen
+function igniteWorld(room, x, z, h) {
+  const tx = Math.floor(x), ty = Math.floor(z);
+  const ch = tileAtR(room, tx, ty);
+  if (!FLAMMABLE.has(ch)) return false;
+  const key = tx + ',' + ty;
+  if ((room.fuel[key] === undefined ? 1 : room.fuel[key]) <= 0 || (room.wet[key] || 0) > 0) return false;
+  if (room.flames.some((o) => !o.floor && Math.hypot(o.x - x, o.z - z) < 0.4)) return false;
+  if (room.flames.length >= FLAME_CAP) return false;
+  const first = !room.fires[key];
+  addFlame(room, x, z, h, false);
+  if (first) {
+    const st = room.st[key];
+    if (st) {
+      destroyItem(room, st);
+      if (st.type === 'T') st.prog = 0;
+      if (st.type === 'S' || st.type === 'T') st.n = Math.floor(st.n / 2);      // část zásob shoří
+    }
+    room.fires[key] = { x: tx, y: ty, hp: h };
+    ev(room, 'fire', tx + 0.5, ty + 0.5, { m: 'Hoří!' });
+  }
   return true;
 }
+// zapálí políčko (sporák, jiskra…) – plamen vznikne poblíž jeho středu
+function igniteAt(room, x, y) {
+  return igniteWorld(room, x + 0.3 + Math.random() * 0.4, y + 0.3 + Math.random() * 0.4, 0.4);
+}
+
 function updateFires(room, dt) {
-  for (const key of Object.keys(room.fires)) {
-    const f = room.fires[key];
-    const sp = up(room, 'sprinkler');
-    if (sp) {
-      f.hp -= dt * 0.07 * sp;                                  // sprinklery pomalu hasí
-      if (f.hp <= 0) { delete room.fires[key]; ev(room, 'extinguish', f.x + 0.5, f.y + 0.5, { m: 'Sprinklery!' }); continue; }
+  const sp = up(room, 'sprinkler');
+  for (const k in room.wet) { room.wet[k] -= dt; if (room.wet[k] <= 0) delete room.wet[k]; }
+  const fl = room.flames;
+  for (let i = fl.length - 1; i >= 0; i--) {
+    const f = fl[i];
+    if (sp) f.h -= dt * 0.07 * sp;                                  // sprinklery pomalu hasí
+    if (f.floor) f.h -= dt * 0.22;                                  // plamen na podlaze nemá palivo
+    else {
+      f.h = Math.min(1, f.h + dt * 0.1);
+      const fu = (room.fuel[f.key] === undefined ? 1 : room.fuel[f.key]) - dt * 0.026 * f.h;
+      room.fuel[f.key] = fu;
+      if (fu <= 0) f.h = 0;                                         // pult dohořel
     }
-    f.spread -= dt;
-    if (f.spread > 0) continue;
-    f.spread = FIRE_SPREAD * (0.8 + Math.random() * 0.5);
-    if (Math.random() > 0.65) continue;
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => Math.random() - 0.5);
-    for (const [dx, dy] of dirs) if (igniteAt(room, f.x + dx, f.y + dy)) break;
+    if (f.h <= 0) { fl.splice(i, 1); continue; }
+    f.sp -= dt * (0.25 + 0.75 * f.h);
+    if (f.sp <= 0) {
+      f.sp = 2.2 + Math.random() * 1.8;
+      const ang = Math.random() * Math.PI * 2, d = 0.45 + Math.random() * (0.4 + 0.9 * f.h);
+      const nx = f.x + Math.cos(ang) * d, nz = f.z + Math.sin(ang) * d;
+      if (!igniteWorld(room, nx, nz, 0.3) && f.h > 0.5 && Math.random() < 0.3 && fl.length < FLAME_CAP && tileAtR(room, Math.floor(nx), Math.floor(nz)) === '.') addFlame(room, nx, nz, 0.35, true);
+    }
+  }
+  rebuildFires(room);
+  // hráč u plamenů si spálí ruce a upustí věc (hasicák je v bezpečí)
+  for (const p of room.players.values()) {
+    p.burnT = (p.burnT || 0) - dt;
+    if (p.sprayT > 0) p.sprayT -= dt;
+    if (p.burnT > 0 || !p.held || isExt(p.held)) continue;
+    for (const f of fl) {
+      if (f.h < 0.3 || Math.hypot(p.x - f.x, p.y - f.z) > 0.28 + 0.3 * f.h) continue;
+      if (isPlate(p.held)) room.returns.push(DIRTY_DELAY);
+      p.held = null; p.burnT = 2.5;
+      ev(room, 'no', p.x, p.y, { m: 'Au, horko! Upustil jsi věc' });
+      break;
+    }
   }
 }
-function spray(room, p, key, f, dt) {
+
+// stříkání hasicákem: kužel před hráčem, míření podle pohledu (ne podle políčka)
+function sprayCone(room, p, dt) {
   const held = p.held;
   if (held.c <= 0) {
-    if (p.sfxT <= 0) { ev(room, 'no', f.x + 0.5, f.y + 0.5, { m: 'Hasicák je prázdný!' }); p.sfxT = 1; }
+    if (p.sfxT <= 0) { ev(room, 'no', p.x, p.y, { m: 'Hasicák je prázdný!' }); p.sfxT = 1; }
     return;
   }
   const lv = up(room, 'ext');
-  f.hp -= dt / EXT_TIME * (1 + 0.35 * lv);
   held.c = Math.max(0, held.c - EXT_DRAIN * dt * (1 - 0.2 * lv));
-  if (p.sfxT <= 0) { ev(room, 'spray', f.x + 0.5, f.y + 0.5); p.sfxT = 0.25; }
-  if (f.hp <= 0) {
-    delete room.fires[key];
+  p.sprayT = 0.25;
+  if (p.sfxT <= 0) { ev(room, 'spray', p.x + p.fx, p.y + p.fy); p.sfxT = 0.25; }
+  const before = [...new Set(room.flames.filter((f) => f.key).map((f) => f.key))];
+  const power = dt * 1.8 * (1 + 0.35 * lv);
+  const fl = room.flames;
+  for (let i = fl.length - 1; i >= 0; i--) {
+    const f = fl[i];
+    const dx = f.x - p.x, dz = f.z - p.y, d = Math.hypot(dx, dz);
+    if (d > SPRAY_RANGE || d < 0.05) continue;
+    if ((dx * p.fx + dz * p.fy) / d < SPRAY_COS) continue;
+    f.h -= power * (1 - 0.55 * d / SPRAY_RANGE);
+    if (f.key) room.wet[f.key] = 6;                                  // zalitý pult se hned znovu nevznítí
+    if (f.h <= 0) fl.splice(i, 1);
+  }
+  rebuildFires(room);
+  for (const key of before) {
+    if (room.flames.some((f) => f.key === key)) continue;
+    const [kx, ky] = key.split(',').map(Number);
     room.stat.fires++; bump(room, p.id, 'fires');
-    ev(room, 'extinguish', f.x + 0.5, f.y + 0.5, { m: 'Uhašeno!' });
+    ev(room, 'extinguish', kx + 0.5, ky + 0.5, { m: 'Uhašeno!' });
   }
 }
 
@@ -1195,7 +1270,7 @@ function interact(room, p) {
   // hořící políčko – použitelný je jen hasicák
   const fire = room.fires[key];
   if (fire) {
-    if (isExt(held)) { spray(room, p, key, fire, 0.35); return undefined; }
+    if (isExt(held)) return undefined;                 // hasicák se používá držením tlačítka
     return ev(room, 'no', fx, fy, { m: 'Hoří! Vezmi hasicák!' });
   }
 
@@ -1313,8 +1388,8 @@ function updateHold(room, p, dt) {
   const key = tx + ',' + ty;
   const fx = tx + 0.5, fy = ty + 0.5;
   p.sfxT -= dt;
+  if (isExt(p.held)) { sprayCone(room, p, dt); return; }
   const fire = room.fires[key];
-  if (isExt(p.held)) { if (fire) spray(room, p, key, fire, dt); return; }
   if (fire) return;
   const st = room.st[key];
   if (!st) return;
@@ -1500,72 +1575,174 @@ function tickRoom(room, dt) {
 /* ------------------------------------------------------------------ */
 /*  Snapshot stavu pro klienty                                         */
 /* ------------------------------------------------------------------ */
-/* ---------- Pomocníci (Dny) ---------- */
+/* ---------- Pomocníci (Dny): skuteční NPC, kteří chodí po kuchyni ---------- */
 function floorNeighbor(map, x, y) {
   for (const [dx, dz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) if (map[y + dz] && map[y + dz][x + dx] === '.') return [x + dx, y + dz];
   return null;
 }
+// nejkratší cesta po podlaze (BFS), vrací středy dlaždic
+function bfsPath(map, sx, sy, gx, gy) {
+  if (sx === gx && sy === gy) return [];
+  const Hh = map.length, Ww = map[0].length;
+  const prev = new Map([[sx + ',' + sy, null]]);
+  const q = [[sx, sy]];
+  while (q.length) {
+    const [x, y] = q.shift();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy, k = nx + ',' + ny;
+      if (nx < 0 || ny < 0 || nx >= Ww || ny >= Hh || prev.has(k) || map[ny][nx] !== '.') continue;
+      prev.set(k, [x, y]);
+      if (nx === gx && ny === gy) {
+        const path = [];
+        let c = [nx, ny];
+        while (c && !(c[0] === sx && c[1] === sy)) { path.unshift([c[0] + 0.5, c[1] + 0.5]); c = prev.get(c[0] + ',' + c[1]); }
+        return path;
+      }
+      q.push([nx, ny]);
+    }
+  }
+  return null;
+}
+function findChar(map, ch) {
+  for (let y = 0; y < map.length; y++) { const x = map[y].indexOf(ch); if (x >= 0) return [x, y]; }
+  return null;
+}
+
+function agentHome(room, kind) {
+  const target = kind === 'dish' ? room.sinks[0] : kind === 'cook' ? Object.values(room.st).find((st) => st.type === 'K') : Object.values(room.st).find((st) => st.type === 'R');
+  if (!target) return null;
+  const nb = floorNeighbor(room.map, target.x, target.y);
+  return nb ? { x: nb[0] + 0.5, y: nb[1] + 0.5, ang: Math.atan2(target.x - nb[0], target.y - nb[1]) } : null;
+}
+const agentTile = (a) => [Math.floor(a.x), Math.floor(a.y)];
+function agentGo(room, a, nb) {            // naplánuje cestu k dlaždici; false, když se tam nedá dojít
+  if (!nb) return false;
+  const [sx, sy] = agentTile(a);
+  const path = bfsPath(room.map, sx, sy, nb[0], nb[1]);
+  if (!path) return false;
+  a.path = path;
+  return true;
+}
+function agentMove(a, speed, dt) {          // true, když dorazil
+  if (!a.path.length) return true;
+  const t = a.path[0], dx = t[0] - a.x, dy = t[1] - a.y, d = Math.hypot(dx, dy), step = speed * dt;
+  if (d <= step) { a.x = t[0]; a.y = t[1]; a.path.shift(); }
+  else { a.x += dx / d * step; a.y += dy / d * step; }
+  if (d > 0.001) a.ang = Math.atan2(dx, dy);
+  a.mv = 1;
+  return a.path.length === 0;
+}
+function agentFace(a, tx, ty) { a.ang = Math.atan2(tx + 0.5 - a.x, ty + 0.5 - a.y); }
+function agentGoHome(room, a) { a.st = 'back'; a.carry = null; if (!agentGo(room, a, [Math.floor(a.home.x), Math.floor(a.home.y)])) { a.x = a.home.x; a.y = a.home.y; a.path = []; } }
 
 function updateHelpers(room, dt) {
   if (room.mode !== 'days') return;
-  const h = room.helpers;
-  if (h.dish) {                                      // myč: myje špinavé talíře
-    if (room.dirty > 0) {
-      room.hk.dish += dt;
-      if (room.hk.dish >= [7, 5, 3.5][h.dish - 1]) {
-        room.hk.dish = 0; room.dirty--; room.plates++;
-        const sk = room.sinks[0];
-        if (sk) ev(room, 'wash', sk.x + 0.5, sk.y + 0.5);
-      }
-    } else room.hk.dish = 0;
-  }
-  room.hk.cookOn = false;
-  if (h.cook) {                                      // pomocný kuchař: krájí suroviny na prkénkách
-    const rate = [0.6, 1.0, 1.5][h.cook - 1];
-    for (const key in room.st) {
-      const st = room.st[key];
-      if (st.type === 'K' && !room.fires[key] && isIng(st.item) && CHOPPABLE[st.item.k] && st.item.s === 'raw') {
-        st.prog += dt / CHOP_TIME * rate;
-        room.hk.cookOn = true;
-        checkChop(room, st, null);
-      }
+  for (const id in HELPERS) {
+    const lvl = room.helpers[id] || 0;
+    if (!lvl) { delete room.ag[id]; continue; }
+    if (!room.ag[id]) {
+      const home = agentHome(room, id);
+      if (!home) continue;
+      room.ag[id] = { k: id, x: home.x, y: home.y, ang: home.ang, home, st: 'idle', path: [], t: 0, wait: 1, carry: null, job: null };
     }
   }
-  if (h.stock) {                                     // skladník: doplňuje police z krabic ve skladu
-    room.hk.stock += dt;
-    if (room.hk.flash > 0) room.hk.flash -= dt;
-    if (room.hk.stock >= [10, 6, 3.5][h.stock - 1]) {
-      room.hk.stock = 0;
-      const bs = boxSizeOf(room), cap = shelfCapOf(room);
-      let best = null;
-      for (const key in room.st) {
-        const st = room.st[key];
-        const k = st.type === 'S' ? st.k : st.type === 'T' ? st.drink : null;
-        if (!k || room.fires[key] || st.n > cap - bs || (room.boxes[k] || 0) <= 0) continue;
-        if (!best || st.n < best.st.n) best = { st, k };
+  const spd = (lvl) => 2.4 + 0.4 * lvl;
+  for (const id in room.ag) {
+    const a = room.ag[id], lvl = room.helpers[id] || 1;
+    a.mv = 0; a.work = 0;
+    if (a.st === 'back') {
+      if (agentMove(a, spd(lvl), dt)) { a.st = 'idle'; a.wait = 0.4; a.ang = a.home.ang; }
+      continue;
+    }
+    if (id === 'dish') {                                            // myč: dřez → špinavý talíř umýt → odnést na stoh
+      if (a.st === 'idle') {
+        a.wait -= dt;
+        if (a.wait <= 0 && room.dirty > 0 && room.sinks[0] && agentGo(room, a, floorNeighbor(room.map, room.sinks[0].x, room.sinks[0].y))) a.st = 'toSink';
+      } else if (a.st === 'toSink') {
+        if (agentMove(a, spd(lvl), dt)) { a.st = 'wash'; a.t = 0; }
+      } else if (a.st === 'wash') {
+        if (room.dirty <= 0) { agentGoHome(room, a); continue; }
+        a.work = 1; a.t += dt; agentFace(a, room.sinks[0].x, room.sinks[0].y);
+        if (a.t >= [6, 4.5, 3][lvl - 1]) {
+          room.dirty--; a.carry = 'plate';
+          const d = findChar(room.map, 'D');
+          if (d && agentGo(room, a, floorNeighbor(room.map, d[0], d[1]))) a.st = 'toStack';
+          else { room.plates++; a.carry = null; agentGoHome(room, a); }
+        }
+      } else if (a.st === 'toStack') {
+        if (agentMove(a, spd(lvl), dt)) { room.plates++; a.carry = null; a.work = 1; agentGoHome(room, a); }
       }
-      if (best) {
-        room.boxes[best.k]--; best.st.n += bs; room.hk.flash = 1.2;
-        ev(room, 'drop', best.st.x + 0.5, best.st.y + 0.5, { m: '+' + bs + ' 📦' });
+    } else if (id === 'cook') {                                     // kuchař: dojde k prkénku se syrovou surovinou a nakrájí ji
+      if (a.st === 'idle') {
+        a.wait -= dt;
+        if (a.wait <= 0) {
+          let best = null, bd = 1e9;
+          for (const key in room.st) {
+            const st = room.st[key];
+            if (st.type !== 'K' || room.fires[key] || !isIng(st.item) || !CHOPPABLE[st.item.k] || st.item.s !== 'raw') continue;
+            const d = Math.hypot(st.x + 0.5 - a.x, st.y + 0.5 - a.y);
+            if (d < bd) { bd = d; best = st; }
+          }
+          if (best && agentGo(room, a, floorNeighbor(room.map, best.x, best.y))) { a.job = { key: best.x + ',' + best.y }; a.st = 'toBoard'; }
+          else a.wait = 0.5;
+        }
+      } else if (a.st === 'toBoard') {
+        if (agentMove(a, spd(lvl), dt)) a.st = 'chop';
+      } else if (a.st === 'chop') {
+        const st = room.st[a.job.key];
+        if (!st || !isIng(st.item) || !CHOPPABLE[st.item.k] || st.item.s !== 'raw') { agentGoHome(room, a); continue; }
+        a.work = 1; agentFace(a, st.x, st.y);
+        st.prog += dt / CHOP_TIME * [0.7, 1.1, 1.6][lvl - 1];
+        checkChop(room, st, null);
+      }
+    } else if (id === 'stock') {                                    // skladník: krabice z regálu → donést na polici, která dochází
+      if (a.st === 'idle') {
+        a.wait -= dt;
+        if (a.wait <= 0) {
+          a.wait = 0.5;
+          const bs = boxSizeOf(room), cap = shelfCapOf(room);
+          let best = null;
+          for (const key in room.st) {
+            const st = room.st[key];
+            const k = st.type === 'S' ? st.k : st.type === 'T' ? st.drink : null;
+            if (!k || room.fires[key] || st.n > cap - bs || (room.boxes[k] || 0) <= 0 || st.claimed) continue;
+            if (!best || st.n < best.st.n) best = { st, k, key };
+          }
+          if (best) {
+            const rack = Object.values(room.st).find((r) => r.type === 'R' && r.k === best.k);
+            if (rack && agentGo(room, a, floorNeighbor(room.map, rack.x, rack.y))) {
+              room.boxes[best.k]--; best.st.claimed = true;
+              a.job = { key: best.key, k: best.k, rack };
+              a.st = 'toRack';
+            }
+          }
+        }
+      } else if (a.st === 'toRack') {
+        if (agentMove(a, spd(lvl), dt)) {
+          a.carry = 'box:' + a.job.k;
+          const t = room.st[a.job.key];
+          if (agentGo(room, a, floorNeighbor(room.map, t.x, t.y))) a.st = 'toShelf';
+          else { room.boxes[a.job.k]++; t.claimed = false; agentGoHome(room, a); }
+        }
+      } else if (a.st === 'toShelf') {
+        if (agentMove(a, spd(lvl), dt)) {
+          const t = room.st[a.job.key];
+          const moved = Math.min(shelfCapOf(room) - t.n, boxSizeOf(room));
+          t.n += Math.max(0, moved); t.claimed = false;
+          if (moved < boxSizeOf(room)) room.boxes[a.job.k] = Math.min(boxCapOf(room), (room.boxes[a.job.k] || 0) + 1);
+          a.work = 1; agentFace(a, t.x, t.y);
+          ev(room, 'drop', t.x + 0.5, t.y + 0.5, { m: '+' + Math.max(0, moved) + ' 📦' });
+          agentGoHome(room, a);
+          a.wait = [4, 2.5, 1.5][lvl - 1];
+        }
       }
     }
   }
 }
 
-// kde pomocníci stojí (jen pro vykreslení; nejsou překážkou)
+// pozice pomocníků pro klienta
 function helperSnapshot(room) {
-  const out = [];
-  const place = (k, lvl, target, active) => {
-    if (!lvl || !target) return;
-    const nb = floorNeighbor(room.map, target.x, target.y);
-    if (!nb) return;
-    out.push({ k, l: lvl, x: nb[0] + 0.5, y: nb[1] + 0.5, tx: target.x + 0.5, ty: target.y + 0.5, a: active ? 1 : 0 });
-  };
-  const h = room.helpers;
-  place('dish', h.dish, room.sinks[0], room.dirty > 0);
-  place('cook', h.cook, Object.values(room.st).find((st) => st.type === 'K'), room.hk.cookOn);
-  place('stock', h.stock, Object.values(room.st).find((st) => st.type === 'R'), room.hk.flash > 0);
-  return out;
+  return Object.values(room.ag).map((a) => ({ k: a.k, l: room.helpers[a.k] || 1, x: r2(a.x), y: r2(a.y), ang: r2(a.ang), a: a.work ? 1 : 0, m: a.mv ? 1 : 0, c: a.carry }));
 }
 
 function snapshot(room) {
@@ -1588,11 +1765,11 @@ function snapshot(room) {
     cd: r1(room.cd),
     sc: room.mode === 'days' ? room.money : room.score,
     pl: [...room.players.values()].map((p) => ({
-      id: p.id, n: p.name, c: p.color, lk: p.look, x: p.x, y: p.y, fx: r2(p.fx), fy: r2(p.fy), h: p.held, ak: p.ack,   // přesná pozice: klient z ní přehrává kroky bit po bitu stejně
+      id: p.id, n: p.name, c: p.color, lk: p.look, sp: p.sprayT > 0 ? 1 : 0, x: p.x, y: p.y, fx: r2(p.fx), fy: r2(p.fy), h: p.held, ak: p.ack,   // přesná pozice: klient z ní přehrává kroky bit po bitu stejně
     })),
     s,
     o: room.orders.map((o) => ({ id: o.id, r: o.r, dr: o.dr, it: o.it, no: o.no, ty: o.ty, fd: o.fd, dd: o.dd, v: o.vip ? 1 : 0, t: r1(o.t), l: o.l })),
-    fi: Object.values(room.fires).map((f) => ({ x: f.x, y: f.y, h: r2(f.hp) })),
+    fl: room.flames.slice(0, 48).map((f) => ({ x: r2(f.x), z: r2(f.z), h: r2(f.h), f: f.floor ? 1 : 0 })),
     rt: room.rats.map((r) => ({ id: r.id, x: r2(r.x), y: r2(r.y), a: r2(r.a), s: r.st === 'eat' ? 1 : r.st === 'flee' ? 2 : 0 })),
     ch: room.chaos ? { id: room.chaos.id, n: room.chaos.n, t: r1(room.chaos.t), d: room.chaos.d } : null,
     d: room.plates,

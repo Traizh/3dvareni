@@ -80,3 +80,8 @@ Kohoutky, rýžovary a pece se otáčejí přední stranou k místu, kde stojí 
 - **Zákazníci:** vybíravý host chce něco „bez“ (talíř musí odpovídat přesně), spěchající host má kratší čas a platí víc, štamgast je trpělivý a dává spropitné, kritik (od dne 3) chce vždy menu, platí dvojnásobek a hodně ovlivní reputaci. Typ je vidět na kartě objednávky, v bublině nad hostem i podle barvy oblečení.
 - **Reputace (⭐ 0–5):** spokojení hosté ji zvyšují, propadlé objednávky snižují. Čím vyšší, tím častěji chodí zákazníci. Pod 0,3 restaurace končí.
 - **Zaměstnanci:** myč nádobí, pomocný kuchař (krájí na prkénkách) a skladník (doplňuje police z krabic). Najímají se v obchodě, mají tři úrovně rychlosti a denní plat, který se strhává spolu s nájmem.
+
+## Oheň, hasicák a pomocníci (pohyb)
+- **Oheň:** plameny jsou volné body v prostoru, ne dlaždice. Rostou, spotřebovávají palivo pultu, na kterém hoří (po čase dohoří), a šíří se do okolí podle své síly – na hořlavé pulty i jako krátké plameny po podlaze. Kdo stojí v plamenech, upustí, co drží. Zalitý pult se chvíli nevznítí. Vykreslení jsou částice (oheň, kouř, záře).
+- **Hasicák:** vezmi ho z držáku a **drž levé tlačítko myši** – pěna stříká kuželem (dosah ~2,8 dlaždice) tam, kam se díváš, a hasí všechny plameny v něm; nemusíš mířit na políčko. Stříkáním do prázdna se jen plýtvá náplní. `E` ho vrátí do držáku. Ostatní hráči stříkání vidí.
+- **Pomocníci:** jsou to skuteční NPC. Myč dojde k dřezu, umyje talíř a odnese ho na stoh; kuchyň dojde k prkénku se syrovou surovinou a nakrájí ji; skladník dojde ke správnému regálu, vezme krabici, přenese ji k polici, která dochází, a doplní ji. Chodí po podlaze nejkratší cestou (nejsou překážkou pro hráče).
